@@ -725,3 +725,100 @@ footer {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--primary-dark);
 }
+
+/* Console Log Viewer */
+.console-section {
+    margin-top: 20px;
+}
+
+.console-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.console-header h2 {
+    margin: 0;
+}
+
+.console-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-small {
+    padding: 8px 16px;
+    font-size: 0.875rem;
+}
+
+.console-output {
+    background: #000;
+    color: #e0e0e0;
+    padding: 16px;
+    border-radius: 8px;
+    font-family: 'Courier New', 'Consolas', monospace;
+    font-size: 0.875rem;
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    line-height: 1.5;
+}
+
+.console-output.collapsed {
+    max-height: 0;
+    padding: 0;
+    overflow: hidden;
+    border: none;
+}
+
+.console-output:empty::before {
+    content: "No console messages yet...";
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.console-log {
+    padding: 4px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.console-log:last-child {
+    border-bottom: none;
+}
+
+.console-log-time {
+    color: #888;
+    margin-right: 8px;
+}
+
+.console-log-type {
+    font-weight: bold;
+    margin-right: 8px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 0.75rem;
+}
+
+.console-log-type.log {
+    color: #4fc3f7;
+}
+
+.console-log-type.warn {
+    color: #ffa726;
+    background: rgba(255, 167, 38, 0.1);
+}
+
+.console-log-type.error {
+    color: #ef5350;
+    background: rgba(239, 83, 80, 0.1);
+}
+
+.console-log-type.info {
+    color: #66bb6a;
+}
+
+.console-log-message {
+    color: #e0e0e0;
+    word-break: break-word;
+}

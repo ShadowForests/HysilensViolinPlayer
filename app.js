@@ -42,6 +42,8 @@ class ViolinPlayer {
         this.violinSampleBuffer = null; // AudioBuffer for violin_a4.wav
         this.violinBaseNote = 69; // A4 = MIDI note 69
         this.currentMidiSource = null; // Current playing note source
+        this.currentMidiGainNode = null; // Current MIDI gain node for live volume updates
+        this.currentNoteVelocity = null; // Current note velocity for recalculation
         this.noteStopTimeout = null; // Timeout to stop note after duration
 
         // Settings
@@ -55,10 +57,16 @@ class ViolinPlayer {
         // Saved connection info
         this.savedConnection = this.loadSavedConnection();
 
+        // Console log history
+        this.consoleHistory = [];
+        this.maxConsoleLines = 100;
+
         this.init();
     }
 
     init() {
+        this.setupConsoleInterceptor();
+        this.setupWindowErrorHandlers();
         this.setupAudio();
         this.setupEventListeners();
         this.updateUI();
@@ -77,6 +85,7 @@ class ViolinPlayer {
 
         // Check if volume control is supported
         this.volumeSupported = this.checkVolumeSupport();
+        console.log("Volume control supported: " + (this.volumeSupported ? "Yes" : "No"));
 
         // Set initial volume (with compatibility check)
         this.setAudioVolume(0); // Start muted
@@ -180,6 +189,125 @@ class ViolinPlayer {
         }
     }
 
+    // ===== CONSOLE INTERCEPTOR =====
+
+    setupConsoleInterceptor() {
+        // Store original console methods
+        const originalLog = console.log;
+        const originalWarn = console.warn;
+        const originalError = console.error;
+        const originalInfo = console.info;
+
+        // Override console.log
+        console.log = (...args) => {
+            originalLog.apply(console, args);
+            this.addConsoleMessage('log', args);
+        };
+
+        // Override console.warn
+        console.warn = (...args) => {
+            originalWarn.apply(console, args);
+            this.addConsoleMessage('warn', args);
+        };
+
+        // Override console.error
+        console.error = (...args) => {
+            originalError.apply(console, args);
+            this.addConsoleMessage('error', args);
+        };
+
+        // Override console.info
+        console.info = (...args) => {
+            originalInfo.apply(console, args);
+            this.addConsoleMessage('info', args);
+        };
+    }
+
+    addConsoleMessage(type, args) {
+        const timestamp = new Date().toLocaleTimeString();
+        const message = args.map(arg => {
+            if (typeof arg === 'object') {
+                try {
+                    return JSON.stringify(arg);
+                } catch (e) {
+                    return String(arg);
+                }
+            }
+            return String(arg);
+        }).join(' ');
+
+        // Add to history
+        this.consoleHistory.push({ type, timestamp, message });
+
+        // Limit history size
+        if (this.consoleHistory.length > this.maxConsoleLines) {
+            this.consoleHistory.shift();
+        }
+
+        // Update display
+        this.updateConsoleDisplay();
+    }
+
+    updateConsoleDisplay() {
+        const consoleOutput = document.getElementById('consoleOutput');
+        if (!consoleOutput) return;
+
+        consoleOutput.innerHTML = this.consoleHistory.map(log => `
+            <div class="console-log">
+                <span class="console-log-time">${log.timestamp}</span>
+                <span class="console-log-type ${log.type}">${log.type.toUpperCase()}</span>
+                <span class="console-log-message">${this.escapeHtml(log.message)}</span>
+            </div>
+        `).join('');
+
+        // Auto-scroll to bottom
+        consoleOutput.scrollTop = consoleOutput.scrollHeight;
+    }
+
+    clearConsole() {
+        this.consoleHistory = [];
+        this.updateConsoleDisplay();
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ===== WINDOW ERROR HANDLERS =====
+
+    setupWindowErrorHandlers() {
+        // Catch uncaught JavaScript errors
+        window.addEventListener('error', (event) => {
+            const errorMsg = event.error
+                ? `${event.error.name}: ${event.error.message}\n  at ${event.filename}:${event.lineno}:${event.colno}`
+                : `${event.message}\n  at ${event.filename}:${event.lineno}:${event.colno}`;
+
+            console.error('Uncaught error:', errorMsg);
+
+            // Don't prevent default error handling
+            return false;
+        });
+
+        // Catch unhandled promise rejections
+        window.addEventListener('unhandledrejection', (event) => {
+            const reason = event.reason;
+            const errorMsg = reason instanceof Error
+                ? `${reason.name}: ${reason.message}\n  ${reason.stack || ''}`
+                : String(reason);
+
+            console.error('Unhandled promise rejection:', errorMsg);
+
+            // Don't prevent default handling
+            return false;
+        });
+
+        console.log('Window error handlers initialized');
+    }
+
+    // ===== EVENT LISTENERS =====
+
     setupEventListeners() {
         // Connection buttons
         document.getElementById('connectBtn').addEventListener('click', () => this.connectDevice());
@@ -219,6 +347,18 @@ class ViolinPlayer {
         document.getElementById('maxVolumeSlider').addEventListener('input', (e) => {
             this.maxVolume = e.target.value / 100;
             document.getElementById('maxVolumeValue').textContent = e.target.value;
+
+            // Update volume live during test playback
+            if (this.isTestPlaying) {
+                if (this.playbackMode === 'MP3') {
+                    // Update MP3 volume immediately
+                    this.setAudioVolume(this.maxVolume);
+                } else if (this.playbackMode === 'MIDI' && this.currentMidiGainNode && this.currentNoteVelocity !== null) {
+                    // Update MIDI gain node volume immediately
+                    const newVolume = this.currentNoteVelocity * this.maxVolume;
+                    this.currentMidiGainNode.gain.value = newVolume;
+                }
+            }
         });
 
         document.getElementById('motionThresholdSlider').addEventListener('input', (e) => {
@@ -228,6 +368,15 @@ class ViolinPlayer {
 
         // Service modal
         document.getElementById('closeServiceModal').addEventListener('click', () => this.closeModal('serviceModal'));
+
+        // Console controls
+        document.getElementById('clearConsoleBtn').addEventListener('click', () => this.clearConsole());
+        document.getElementById('toggleConsoleBtn').addEventListener('click', () => {
+            const consoleOutput = document.getElementById('consoleOutput');
+            const toggleBtn = document.getElementById('toggleConsoleBtn');
+            consoleOutput.classList.toggle('collapsed');
+            toggleBtn.textContent = consoleOutput.classList.contains('collapsed') ? 'Expand' : 'Collapse';
+        });
 
         // Update playback position
         setInterval(() => this.updatePlaybackPosition(), 100);
@@ -271,7 +420,7 @@ class ViolinPlayer {
             this.device = await navigator.bluetooth.requestDevice({
                 acceptAllDevices: true,
                 optionalServices: commonServices,
-                filters: [{ service: commonServices }]
+//                filters: [{ service: commonServices }]
             });
 
             console.log('Device selected:', this.device.name);
@@ -818,6 +967,10 @@ class ViolinPlayer {
             this.currentMidiSource = null;
         }
 
+        // Clear gain node and velocity references
+        this.currentMidiGainNode = null;
+        this.currentNoteVelocity = null;
+
         // Cancel scheduled stop
         if (this.noteStopTimeout) {
             clearTimeout(this.noteStopTimeout);
@@ -852,8 +1005,17 @@ class ViolinPlayer {
 
         // Calculate volume from note velocity and motion speed
         const velocityVolume = note.velocity / 127.0;
-        const normalizedSpeed = Math.min(this.motionSpeed / this.MAX_MOTION_SPEED, 1.0);
-        const volume = velocityVolume * normalizedSpeed * this.maxVolume;
+
+        // Use max volume for test playback, motion-controlled volume for IMU playback
+        let volume;
+        if (this.isTestPlaying) {
+            // Test playback: use max volume
+            volume = velocityVolume * this.maxVolume;
+        } else {
+            // IMU playback: use motion speed
+            const normalizedSpeed = Math.min(this.motionSpeed / this.MAX_MOTION_SPEED, 1.0);
+            volume = velocityVolume * normalizedSpeed * this.maxVolume;
+        }
         gainNode.gain.value = volume;
 
         // Calculate pitch shift rate
@@ -870,6 +1032,8 @@ class ViolinPlayer {
         // Start playing
         source.start();
         this.currentMidiSource = source;
+        this.currentMidiGainNode = gainNode; // Store gain node for live volume updates
+        this.currentNoteVelocity = velocityVolume; // Store velocity for recalculation
 
         console.log(`Playing MIDI note ${note.pitch}: rate=${clampedRate.toFixed(3)}, volume=${volume.toFixed(3)}, duration=${note.duration}ms`);
 
@@ -882,6 +1046,8 @@ class ViolinPlayer {
                     // Already stopped
                 }
                 this.currentMidiSource = null;
+                this.currentMidiGainNode = null;
+                this.currentNoteVelocity = null;
             }
         }, note.duration);
     }
@@ -896,8 +1062,17 @@ class ViolinPlayer {
         oscillator.frequency.value = frequency;
         oscillator.type = 'sine';
 
-        const normalizedSpeed = Math.min(this.motionSpeed / this.MAX_MOTION_SPEED, 1.0);
-        const volume = normalizedSpeed * this.maxVolume;
+        // Use max volume for test playback, motion-controlled volume for IMU playback
+        let volume;
+        if (this.isTestPlaying) {
+            // Test playback: use max volume
+            volume = this.maxVolume;
+            this.currentNoteVelocity = 1.0; // Store for recalculation
+        } else {
+            // IMU playback: use motion speed
+            const normalizedSpeed = Math.min(this.motionSpeed / this.MAX_MOTION_SPEED, 1.0);
+            volume = normalizedSpeed * this.maxVolume;
+        }
         gainNode.gain.value = volume;
 
         oscillator.connect(gainNode);
@@ -907,8 +1082,9 @@ class ViolinPlayer {
         oscillator.stop(this.midiAudioContext.currentTime + note.duration / 1000);
 
         this.currentMidiSource = oscillator;
+        this.currentMidiGainNode = gainNode; // Store gain node for live volume updates
 
-        console.log(`Playing MIDI note ${note.pitch} with sine wave (fallback)`);
+        console.log(`Playing MIDI note ${note.pitch} with sine wave (fallback), volume=${volume.toFixed(3)}`);
     }
 
     // ===== PLAYBACK CONTROL =====
@@ -1761,7 +1937,7 @@ window.addEventListener('DOMContentLoaded', () => {
     // Check for Web Bluetooth support
     if (!navigator.bluetooth) {
         alert('Web Bluetooth API is not supported in this browser. Please use Chrome or Edge.');
-        return;
+//        return;
     }
 
     // Create the violin player instance
