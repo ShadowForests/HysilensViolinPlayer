@@ -303,12 +303,12 @@ class ViolinPlayer {
         const shouldLog = !this.lastLoggedVolume || Math.abs(clampedVolume - this.lastLoggedVolume) > 0.05;
 
         try {
-            // On iOS or when using Web Audio volume, always use gain node
+            // On iOS or when using Web Audio volume, use gain node with smooth ramping
             if (this.usingWebAudioVolume && this.audioGainNode) {
-                this.audioGainNode.gain.value = clampedVolume;
+                this.setGainWithRamp(this.audioGainNode, clampedVolume);
                 if (shouldLog) {
                     console.log(`🔊 Volume set via Web Audio gain: ${(clampedVolume * 100).toFixed(0)}%`);
-                    console.log('  Method: Web Audio API GainNode');
+                    console.log('  Method: Web Audio API GainNode (smooth ramp)');
                     console.log('  Gain value:', clampedVolume.toFixed(3));
                     this.lastLoggedVolume = clampedVolume;
                 }
@@ -350,6 +350,43 @@ class ViolinPlayer {
         }
     }
 
+    // Set gain value with smooth exponential ramping to prevent clicks/pops
+    setGainWithRamp(gainNode, targetVolume, rampTime = 0.015) {
+        try {
+            if (!gainNode || !gainNode.gain) {
+                console.warn('setGainWithRamp: Invalid gain node');
+                return;
+            }
+
+            const currentTime = this.audioContext.currentTime;
+            const currentValue = gainNode.gain.value;
+
+            // Cancel any scheduled parameter changes
+            gainNode.gain.cancelScheduledValues(currentTime);
+
+            // Set current value explicitly
+            gainNode.gain.setValueAtTime(currentValue, currentTime);
+
+            // Handle zero values specially to prevent exponentialRamp errors
+            if (targetVolume < 0.001) {
+                // Ramp to very small value, then to zero
+                gainNode.gain.exponentialRampToValueAtTime(0.001, currentTime + rampTime * 0.8);
+                gainNode.gain.linearRampToValueAtTime(0, currentTime + rampTime);
+            } else if (currentValue < 0.001) {
+                // Ramp from very small value
+                gainNode.gain.setValueAtTime(0.001, currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(Math.max(targetVolume, 0.001), currentTime + rampTime);
+            } else {
+                // Normal exponential ramp (smooth and natural sounding)
+                gainNode.gain.exponentialRampToValueAtTime(Math.max(targetVolume, 0.001), currentTime + rampTime);
+            }
+        } catch (e) {
+            console.warn('Failed to set gain with ramp, falling back to direct value:', e.message);
+            // Fallback to direct value setting if ramping fails
+            gainNode.gain.value = targetVolume;
+        }
+    }
+
     // Fallback method using Web Audio API for volume control
     useWebAudioGain(volume) {
         try {
@@ -371,9 +408,9 @@ class ViolinPlayer {
                 }
             }
 
-            // Set gain value (acts as volume)
+            // Set gain value with smooth ramping to prevent clicks/pops
             if (this.audioGainNode && this.audioGainNode.gain) {
-                this.audioGainNode.gain.value = volume;
+                this.setGainWithRamp(this.audioGainNode, volume);
             }
         } catch (e) {
             console.warn('Web Audio API gain fallback failed:', e);
@@ -557,9 +594,9 @@ class ViolinPlayer {
                     // Update MP3 volume immediately
                     this.setAudioVolume(this.maxVolume);
                 } else if (this.playbackMode === 'MIDI' && this.currentMidiGainNode && this.currentNoteVelocity !== null) {
-                    // Update MIDI gain node volume immediately
+                    // Update MIDI gain node volume with smooth ramping
                     const newVolume = this.currentNoteVelocity * this.maxVolume;
-                    this.currentMidiGainNode.gain.value = newVolume;
+                    this.setGainWithRamp(this.currentMidiGainNode, newVolume, 0.01);
                 }
             }
         });
@@ -1219,7 +1256,9 @@ class ViolinPlayer {
             const normalizedSpeed = Math.min(this.motionSpeed / this.MAX_MOTION_SPEED, 1.0);
             volume = velocityVolume * normalizedSpeed * this.maxVolume;
         }
-        gainNode.gain.value = volume;
+
+        // Set initial gain value (start at volume, will ramp in if needed)
+        gainNode.gain.setValueAtTime(Math.max(volume, 0.001), this.midiAudioContext.currentTime);
 
         // Calculate pitch shift rate
         // Each semitone = 2^(1/12) ≈ 1.059463
@@ -1276,7 +1315,9 @@ class ViolinPlayer {
             const normalizedSpeed = Math.min(this.motionSpeed / this.MAX_MOTION_SPEED, 1.0);
             volume = normalizedSpeed * this.maxVolume;
         }
-        gainNode.gain.value = volume;
+
+        // Set initial gain value (start at volume, will ramp in if needed)
+        gainNode.gain.setValueAtTime(Math.max(volume, 0.001), this.midiAudioContext.currentTime);
 
         oscillator.connect(gainNode);
         gainNode.connect(this.midiAudioContext.destination);
@@ -1423,6 +1464,12 @@ class ViolinPlayer {
             if (this.audioContext.state === 'suspended') {
                 console.log('🔊 Resuming AudioContext for iOS...');
                 await this.audioContext.resume();
+            }
+
+            // Setup Web Audio API if needed (for iOS or when volume not supported)
+            if (this.needsWebAudioVolume && !this.usingWebAudioVolume && this.audioElement.src) {
+                console.log('🔊 Setting up Web Audio API for IMU playback...');
+                await this.setupWebAudioVolume();
             }
 
             // Start IMU playback if audio is loaded
