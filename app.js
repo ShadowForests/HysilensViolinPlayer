@@ -81,24 +81,77 @@ class ViolinPlayer {
     }
 
     setupAudio() {
-        this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        console.log('=== Audio Setup: Browser Compatibility Check ===');
+
+        // Detect browser info
+        const userAgent = navigator.userAgent;
+        console.log('User Agent:', userAgent);
+        console.log('Platform:', navigator.platform);
+
+        // Check AudioContext support
+        const hasAudioContext = !!(window.AudioContext || window.webkitAudioContext);
+        console.log('AudioContext supported:', hasAudioContext ? 'YES ✅' : 'NO ❌');
+
+        if (hasAudioContext) {
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            console.log('AudioContext created successfully');
+            console.log('  - State:', this.audioContext.state);
+            console.log('  - Sample rate:', this.audioContext.sampleRate + ' Hz');
+            console.log('  - Base latency:', this.audioContext.baseLatency || 'N/A');
+        } else {
+            console.error('AudioContext NOT available');
+        }
+
         this.audioElement = new Audio();
         this.audioElement.loop = true;
+        console.log('Audio element created:', !!this.audioElement ? 'YES ✅' : 'NO ❌');
 
         // Detect iOS specifically (iOS always blocks volume control)
         this.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        console.log('iOS detected:', this.isIOS ? 'YES ✅' : 'NO ❌');
 
         // Check if volume control is supported
         this.volumeSupported = this.checkVolumeSupport();
-        console.log("Volume control supported: " + (this.volumeSupported ? "Yes" : "No"));
-        console.log("iOS detected: " + (this.isIOS ? "Yes" : "No"));
+        console.log('HTML5 volume control supported:', this.volumeSupported ? 'YES ✅' : 'NO ❌');
 
+        // Check Web Audio API features for gain workaround
+        console.log('--- Web Audio API Features ---');
+        if (hasAudioContext && this.audioContext) {
+            const hasCreateMediaElementSource = typeof this.audioContext.createMediaElementSource === 'function';
+            const hasCreateGain = typeof this.audioContext.createGain === 'function';
+            const hasDestination = !!this.audioContext.destination;
+
+            console.log('createMediaElementSource:', hasCreateMediaElementSource ? 'YES ✅' : 'NO ❌');
+            console.log('createGain:', hasCreateGain ? 'YES ✅' : 'NO ❌');
+            console.log('destination node:', hasDestination ? 'YES ✅' : 'NO ❌');
+
+            if (hasCreateMediaElementSource && hasCreateGain && hasDestination) {
+                console.log('Web Audio API gain workaround: AVAILABLE ✅');
+                console.log('  Note: Will be setup after audio loads');
+            } else {
+                console.warn('Web Audio API gain workaround: INCOMPLETE ⚠️');
+                if (!hasCreateMediaElementSource) console.warn('  - Missing: createMediaElementSource');
+                if (!hasCreateGain) console.warn('  - Missing: createGain');
+                if (!hasDestination) console.warn('  - Missing: destination');
+            }
+        } else {
+            console.error('Web Audio API gain workaround: NOT AVAILABLE ❌');
+        }
+
+        console.log('--- Volume Control Strategy ---');
         // On iOS or when volume not supported, prepare for Web Audio API
         // Note: We can't create MediaElementSource until audio has a source
         if (this.isIOS || !this.volumeSupported) {
             this.needsWebAudioVolume = true;
-            console.log('🔊 Will use Web Audio API for volume control when audio loads');
+            console.log('🔊 SELECTED: Web Audio API gain workaround');
+            console.log('  Reason:', this.isIOS ? 'iOS device detected' : 'HTML5 volume not writable');
+            console.log('  Status: Will setup after audio loads');
+        } else {
+            console.log('🔊 SELECTED: Standard HTML5 volume control');
+            console.log('  Reason: Desktop browser with working volume property');
         }
+
+        console.log('=======================================');
 
         // Set initial volume (with compatibility check)
         this.setAudioVolume(0); // Start muted
@@ -139,48 +192,104 @@ class ViolinPlayer {
 
     // Setup Web Audio API for volume control (required for iOS)
     async setupWebAudioVolume() {
+        console.log('=== Setting up Web Audio Volume Control ===');
         try {
             // Check if audio element has a source (required for MediaElementSource)
+            console.log('Step 1: Checking audio element...');
+            console.log('  - Audio element exists:', !!this.audioElement);
+            console.log('  - Audio element src:', this.audioElement?.src || 'NONE');
+
             if (!this.audioElement || !this.audioElement.src) {
                 console.warn('⚠️ Cannot setup Web Audio yet: audio element has no source');
+                console.log('Result: FAILED (no audio source)');
+                console.log('========================================');
                 return false;
             }
+            console.log('  ✅ Audio element has source');
+
+            // Check AudioContext state
+            console.log('Step 2: Checking AudioContext...');
+            console.log('  - AudioContext exists:', !!this.audioContext);
+            console.log('  - AudioContext state:', this.audioContext?.state);
 
             // Resume AudioContext on iOS (required due to autoplay policy)
             if (this.audioContext.state === 'suspended') {
-                console.log('🔊 Resuming AudioContext (iOS requirement)...');
+                console.log('  - AudioContext is suspended, attempting to resume...');
                 await this.audioContext.resume();
-                console.log('✅ AudioContext resumed, state:', this.audioContext.state);
+                console.log('  - After resume, state:', this.audioContext.state);
+
+                if (this.audioContext.state === 'running') {
+                    console.log('  ✅ AudioContext resumed successfully');
+                } else {
+                    console.warn('  ⚠️ AudioContext state:', this.audioContext.state);
+                }
+            } else {
+                console.log('  ✅ AudioContext already running');
             }
 
             // Create MediaElementSource from audio element (can only be done once!)
+            console.log('Step 3: Creating MediaElementSource...');
             if (!this.audioSource) {
-                this.audioSource = this.audioContext.createMediaElementSource(this.audioElement);
-                console.log('✅ Created MediaElementSource for audio element');
+                try {
+                    this.audioSource = this.audioContext.createMediaElementSource(this.audioElement);
+                    console.log('  ✅ MediaElementSource created successfully');
+                } catch (e) {
+                    console.error('  ❌ Failed to create MediaElementSource:', e.message);
+                    throw e;
+                }
+            } else {
+                console.log('  ℹ️ MediaElementSource already exists (reusing)');
             }
 
             // Create gain node for volume control
+            console.log('Step 4: Creating GainNode...');
             if (!this.audioGainNode) {
-                this.audioGainNode = this.audioContext.createGain();
-                this.audioGainNode.gain.value = 0; // Start muted
-                console.log('✅ Created GainNode for volume control');
+                try {
+                    this.audioGainNode = this.audioContext.createGain();
+                    this.audioGainNode.gain.value = 0; // Start muted
+                    console.log('  ✅ GainNode created successfully');
+                    console.log('  - Initial gain value:', this.audioGainNode.gain.value);
+                } catch (e) {
+                    console.error('  ❌ Failed to create GainNode:', e.message);
+                    throw e;
+                }
+            } else {
+                console.log('  ℹ️ GainNode already exists (reusing)');
             }
 
             // Connect: audio element → source → gain → destination
+            console.log('Step 5: Connecting audio graph...');
             if (this.audioSource && this.audioGainNode) {
-                this.audioSource.connect(this.audioGainNode);
-                this.audioGainNode.connect(this.audioContext.destination);
-                console.log('✅ Connected audio graph: Element → Gain → Output');
+                try {
+                    this.audioSource.connect(this.audioGainNode);
+                    console.log('  ✅ Connected: MediaElementSource → GainNode');
+
+                    this.audioGainNode.connect(this.audioContext.destination);
+                    console.log('  ✅ Connected: GainNode → AudioDestination');
+
+                    console.log('  ✅ Complete audio graph connected');
+                } catch (e) {
+                    console.error('  ❌ Failed to connect audio graph:', e.message);
+                    throw e;
+                }
+            } else {
+                console.error('  ❌ Missing nodes for connection');
+                throw new Error('Audio source or gain node is missing');
             }
 
             // Mark that we're using Web Audio API for volume
             this.usingWebAudioVolume = true;
             console.log('✅ Web Audio volume control ready!');
+            console.log('========================================');
             return true;
 
         } catch (e) {
-            console.error('❌ Failed to setup Web Audio API volume control:', e);
+            console.error('❌ Failed to setup Web Audio API volume control');
+            console.error('Error:', e.message);
+            console.error('Stack:', e.stack);
             this.usingWebAudioVolume = false;
+            console.log('Result: FAILED');
+            console.log('========================================');
             return false;
         }
     }
@@ -190,27 +299,53 @@ class ViolinPlayer {
         // Clamp volume between 0 and 1
         const clampedVolume = Math.max(0, Math.min(1, volume));
 
+        // Only log on significant volume changes (not every slider movement)
+        const shouldLog = !this.lastLoggedVolume || Math.abs(clampedVolume - this.lastLoggedVolume) > 0.05;
+
         try {
             // On iOS or when using Web Audio volume, always use gain node
             if (this.usingWebAudioVolume && this.audioGainNode) {
                 this.audioGainNode.gain.value = clampedVolume;
-                console.log(`🔊 Set volume via Web Audio gain: ${clampedVolume.toFixed(3)}`);
+                if (shouldLog) {
+                    console.log(`🔊 Volume set via Web Audio gain: ${(clampedVolume * 100).toFixed(0)}%`);
+                    console.log('  Method: Web Audio API GainNode');
+                    console.log('  Gain value:', clampedVolume.toFixed(3));
+                    this.lastLoggedVolume = clampedVolume;
+                }
                 return true;
             }
 
             // Try standard HTML5 volume property (desktop browsers)
             if (this.audioElement && typeof this.audioElement.volume !== 'undefined') {
+                const before = this.audioElement.volume;
                 this.audioElement.volume = clampedVolume;
+                const after = this.audioElement.volume;
+
+                if (shouldLog) {
+                    console.log(`🔊 Volume set via HTML5: ${(clampedVolume * 100).toFixed(0)}%`);
+                    console.log('  Method: HTML5 Audio.volume property');
+                    console.log('  Requested:', clampedVolume.toFixed(3));
+                    console.log('  Actual:', after.toFixed(3));
+
+                    if (Math.abs(after - clampedVolume) > 0.01) {
+                        console.warn('  ⚠️ Volume may not be controllable (iOS?)');
+                    }
+                    this.lastLoggedVolume = clampedVolume;
+                }
             }
 
             // Fallback: Use Web Audio API gain node if available
             if (!this.volumeSupported && this.audioContext) {
+                if (shouldLog) {
+                    console.log(`🔊 Using fallback Web Audio gain`);
+                }
                 this.useWebAudioGain(clampedVolume);
             }
 
             return true;
         } catch (e) {
-            console.warn('Failed to set audio volume:', e);
+            console.error('❌ Failed to set audio volume:', e.message);
+            console.error('Volume requested:', clampedVolume);
             return false;
         }
     }
