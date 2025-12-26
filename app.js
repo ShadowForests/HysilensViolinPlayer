@@ -17,6 +17,8 @@ class ViolinPlayer {
         this.audioSource = null;
         this.audioGainNode = null; // For fallback volume control
         this.volumeSupported = true; // Browser volume support flag
+        this.usingWebAudioVolume = false; // Flag for Web Audio volume control
+        this.needsWebAudioVolume = false; // Flag to setup Web Audio when audio loads
         this.currentTrack = null;
         this.isTestPlaying = false;
         this.isImuPlaying = true; // Default to true
@@ -83,9 +85,20 @@ class ViolinPlayer {
         this.audioElement = new Audio();
         this.audioElement.loop = true;
 
+        // Detect iOS specifically (iOS always blocks volume control)
+        this.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+
         // Check if volume control is supported
         this.volumeSupported = this.checkVolumeSupport();
         console.log("Volume control supported: " + (this.volumeSupported ? "Yes" : "No"));
+        console.log("iOS detected: " + (this.isIOS ? "Yes" : "No"));
+
+        // On iOS or when volume not supported, prepare for Web Audio API
+        // Note: We can't create MediaElementSource until audio has a source
+        if (this.isIOS || !this.volumeSupported) {
+            this.needsWebAudioVolume = true;
+            console.log('🔊 Will use Web Audio API for volume control when audio loads');
+        }
 
         // Set initial volume (with compatibility check)
         this.setAudioVolume(0); // Start muted
@@ -97,8 +110,8 @@ class ViolinPlayer {
         this.loadViolinSample();
 
         // Log compatibility info
-        if (!this.volumeSupported) {
-            console.warn('⚠️ Volume control not supported in this browser. Using alternative methods.');
+        if (!this.volumeSupported || this.isIOS) {
+            console.warn('⚠️ Will use Web Audio API gain node for volume control (iOS or unsupported browser)');
         }
     }
 
@@ -124,13 +137,68 @@ class ViolinPlayer {
         }
     }
 
+    // Setup Web Audio API for volume control (required for iOS)
+    async setupWebAudioVolume() {
+        try {
+            // Check if audio element has a source (required for MediaElementSource)
+            if (!this.audioElement || !this.audioElement.src) {
+                console.warn('⚠️ Cannot setup Web Audio yet: audio element has no source');
+                return false;
+            }
+
+            // Resume AudioContext on iOS (required due to autoplay policy)
+            if (this.audioContext.state === 'suspended') {
+                console.log('🔊 Resuming AudioContext (iOS requirement)...');
+                await this.audioContext.resume();
+                console.log('✅ AudioContext resumed, state:', this.audioContext.state);
+            }
+
+            // Create MediaElementSource from audio element (can only be done once!)
+            if (!this.audioSource) {
+                this.audioSource = this.audioContext.createMediaElementSource(this.audioElement);
+                console.log('✅ Created MediaElementSource for audio element');
+            }
+
+            // Create gain node for volume control
+            if (!this.audioGainNode) {
+                this.audioGainNode = this.audioContext.createGain();
+                this.audioGainNode.gain.value = 0; // Start muted
+                console.log('✅ Created GainNode for volume control');
+            }
+
+            // Connect: audio element → source → gain → destination
+            if (this.audioSource && this.audioGainNode) {
+                this.audioSource.connect(this.audioGainNode);
+                this.audioGainNode.connect(this.audioContext.destination);
+                console.log('✅ Connected audio graph: Element → Gain → Output');
+            }
+
+            // Mark that we're using Web Audio API for volume
+            this.usingWebAudioVolume = true;
+            console.log('✅ Web Audio volume control ready!');
+            return true;
+
+        } catch (e) {
+            console.error('❌ Failed to setup Web Audio API volume control:', e);
+            this.usingWebAudioVolume = false;
+            return false;
+        }
+    }
+
     // Safely set audio volume with fallbacks for older browsers
     setAudioVolume(volume) {
         // Clamp volume between 0 and 1
         const clampedVolume = Math.max(0, Math.min(1, volume));
 
         try {
-            // Try standard HTML5 volume property
+            // On iOS or when using Web Audio volume, always use gain node
+            if (this.usingWebAudioVolume && this.audioGainNode) {
+                this.audioGainNode.gain.value = clampedVolume;
+                console.log(`🔊 Set volume via Web Audio gain: ${clampedVolume.toFixed(3)}`);
+                return true;
+            }
+
+            // Try standard HTML5 volume property (desktop browsers)
             if (this.audioElement && typeof this.audioElement.volume !== 'undefined') {
                 this.audioElement.volume = clampedVolume;
             }
@@ -1158,10 +1226,16 @@ class ViolinPlayer {
             this.audioElement.removeEventListener('loadedmetadata', this.onMetadataLoaded);
 
             // Create bound function for event listener
-            this.onMetadataLoaded = () => {
+            this.onMetadataLoaded = async () => {
                 document.getElementById('duration').textContent = this.formatTime(this.audioElement.duration);
                 document.getElementById('seekSlider').max = this.audioElement.duration;
                 console.log(`MP3 loaded: duration=${this.audioElement.duration.toFixed(2)}s`);
+
+                // Setup Web Audio API for iOS after audio source is loaded
+                if (this.needsWebAudioVolume && !this.usingWebAudioVolume) {
+                    console.log('🔊 Setting up Web Audio API for iOS...');
+                    await this.setupWebAudioVolume();
+                }
             };
 
             // Add new listener
@@ -1185,7 +1259,7 @@ class ViolinPlayer {
         }
     }
 
-    toggleImuPlayback() {
+    async toggleImuPlayback() {
         this.isImuPlaying = !this.isImuPlaying;
         const btn = document.getElementById('imuPlaybackBtn');
 
@@ -1210,6 +1284,12 @@ class ViolinPlayer {
                 console.log('Test playback stopped (IMU playback started)');
             }
 
+            // Resume AudioContext on iOS if needed
+            if (this.audioContext.state === 'suspended') {
+                console.log('🔊 Resuming AudioContext for iOS...');
+                await this.audioContext.resume();
+            }
+
             // Start IMU playback if audio is loaded
             if (this.audioElement.src && this.playbackMode === 'MP3') {
                 this.audioElement.play().catch(e => console.log('Play error:', e));
@@ -1225,7 +1305,7 @@ class ViolinPlayer {
         }
     }
 
-    toggleTestPlayback() {
+    async toggleTestPlayback() {
         this.isTestPlaying = !this.isTestPlaying;
         const btn = document.getElementById('testPlaybackBtn');
 
@@ -1249,6 +1329,12 @@ class ViolinPlayer {
                 }
 
                 console.log('IMU playback paused (test playback started)');
+            }
+
+            // Resume AudioContext on iOS if needed
+            if (this.audioContext.state === 'suspended') {
+                console.log('🔊 Resuming AudioContext for iOS...');
+                await this.audioContext.resume();
             }
 
             // Start test playback
