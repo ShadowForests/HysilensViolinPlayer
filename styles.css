@@ -81,6 +81,26 @@ header h1 {
     color: var(--text-secondary);
 }
 
+/* Compatibility Warning */
+.compatibility-warning {
+    background: rgba(245, 158, 11, 0.1);
+    border: 1px solid var(--warning-color);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--warning-color);
+    font-size: 0.9rem;
+    line-height: 1.4;
+}
+
+.compatibility-warning .warning-icon {
+    font-size: 1.2rem;
+    flex-shrink: 0;
+}
+
 /* Buttons */
 .btn {
     padding: 12px 24px;
@@ -664,12 +684,10 @@ footer {
         width: 100%;
     }
 }
-    }
 
-    .control-row {
-        flex-direction: column;
-        align-items: stretch;
-    }
+.control-row {
+    flex-direction: column;
+    align-items: stretch;
 }
 
 /* Animations */
@@ -707,4 +725,3 @@ footer {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--primary-dark);
 }
-

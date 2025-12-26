@@ -15,6 +15,8 @@ class ViolinPlayer {
         this.audioContext = null;
         this.audioElement = null;
         this.audioSource = null;
+        this.audioGainNode = null; // For fallback volume control
+        this.volumeSupported = true; // Browser volume support flag
         this.currentTrack = null;
         this.isTestPlaying = false;
         this.isImuPlaying = true; // Default to true
@@ -33,7 +35,7 @@ class ViolinPlayer {
         this.playbackMode = 'MP3'; // 'MP3' or 'MIDI'
         this.midiNotes = [];
         this.currentNoteIndex = 0;
-        this.midiPlaybackInterval = null;
+        this.isPlayingMidiSequence = false; // Track if MIDI sequence is playing
         this.midiAudioContext = null;
 
         // Violin sample for MIDI playback
@@ -72,13 +74,98 @@ class ViolinPlayer {
         this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
         this.audioElement = new Audio();
         this.audioElement.loop = true;
-        this.audioElement.volume = 0; // Start muted
+
+        // Check if volume control is supported
+        this.volumeSupported = this.checkVolumeSupport();
+
+        // Set initial volume (with compatibility check)
+        this.setAudioVolume(0); // Start muted
 
         // Setup audio context for MIDI with violin sample
         this.midiAudioContext = new (window.AudioContext || window.webkitAudioContext)();
 
         // Load violin_a4.wav sample for MIDI playback
         this.loadViolinSample();
+
+        // Log compatibility info
+        if (!this.volumeSupported) {
+            console.warn('⚠️ Volume control not supported in this browser. Using alternative methods.');
+        }
+    }
+
+    // Check if browser supports HTML5 audio volume control
+    checkVolumeSupport() {
+        try {
+            const testAudio = new Audio();
+            // Some mobile browsers and older browsers don't support volume
+            if (typeof testAudio.volume === 'undefined') {
+                return false;
+            }
+
+            // Try to set volume to test if it's writable
+            const originalVolume = testAudio.volume;
+            testAudio.volume = 0.5;
+            const volumeChanged = testAudio.volume === 0.5;
+            testAudio.volume = originalVolume;
+
+            return volumeChanged;
+        } catch (e) {
+            console.warn('Volume support check failed:', e);
+            return false;
+        }
+    }
+
+    // Safely set audio volume with fallbacks for older browsers
+    setAudioVolume(volume) {
+        // Clamp volume between 0 and 1
+        const clampedVolume = Math.max(0, Math.min(1, volume));
+
+        try {
+            // Try standard HTML5 volume property
+            if (this.audioElement && typeof this.audioElement.volume !== 'undefined') {
+                this.audioElement.volume = clampedVolume;
+            }
+
+            // Fallback: Use Web Audio API gain node if available
+            if (!this.volumeSupported && this.audioContext) {
+                this.useWebAudioGain(clampedVolume);
+            }
+
+            return true;
+        } catch (e) {
+            console.warn('Failed to set audio volume:', e);
+            return false;
+        }
+    }
+
+    // Fallback method using Web Audio API for volume control
+    useWebAudioGain(volume) {
+        try {
+            // Create gain node if not exists
+            if (!this.audioGainNode) {
+                // Create MediaElementSource if not exists
+                if (!this.audioSource && this.audioElement) {
+                    this.audioSource = this.audioContext.createMediaElementSource(this.audioElement);
+                }
+
+                if (!this.audioGainNode) {
+                    this.audioGainNode = this.audioContext.createGain();
+                }
+
+                // Connect: source → gain → destination
+                if (this.audioSource && this.audioGainNode) {
+                    this.audioSource.connect(this.audioGainNode);
+                    this.audioGainNode.connect(this.audioContext.destination);
+                }
+            }
+
+            // Set gain value (acts as volume)
+            if (this.audioGainNode && this.audioGainNode.gain) {
+                this.audioGainNode.gain.value = volume;
+            }
+        } catch (e) {
+            console.warn('Web Audio API gain fallback failed:', e);
+        }
     }
 
     async loadViolinSample() {
@@ -183,7 +270,8 @@ class ViolinPlayer {
 
             this.device = await navigator.bluetooth.requestDevice({
                 acceptAllDevices: true,
-                optionalServices: commonServices
+                optionalServices: commonServices,
+                filters: [{ service: commonServices }]
             });
 
             console.log('Device selected:', this.device.name);
@@ -563,7 +651,7 @@ class ViolinPlayer {
                     this.audioElement.play().catch(e => console.log('Play error:', e));
                 }
                 this.currentVolume = this.maxVolume;
-                this.audioElement.volume = this.currentVolume;
+                this.setAudioVolume(this.currentVolume);
 
             } else {
                 // Below threshold: Gradient fade or pause
@@ -589,7 +677,7 @@ class ViolinPlayer {
                         this.audioElement.play().catch(e => console.log('Play error:', e));
                     }
                     this.currentVolume = targetVolume;
-                    this.audioElement.volume = targetVolume;
+                    this.setAudioVolume(targetVolume);
                 }
             }
         }
@@ -599,39 +687,124 @@ class ViolinPlayer {
         const normalizedSpeed = Math.min(this.motionSpeed / this.MAX_MOTION_SPEED, 1.0);
         const isMoving = normalizedSpeed >= this.motionThreshold;
 
-        if (isMoving && !this.midiPlaybackInterval) {
-            this.startMidiPlayback();
-        } else if (!isMoving && this.midiPlaybackInterval) {
-            this.stopMidiPlayback();
+        if (isMoving && !this.isPlayingMidiSequence) {
+            this.startContinuousMidiPlayback();
+        } else if (!isMoving && this.isPlayingMidiSequence) {
+            this.stopContinuousMidiPlayback();
         }
     }
 
-    startMidiPlayback() {
-        if (this.midiNotes.length === 0) return;
+    async startContinuousMidiPlayback() {
+        if (this.isPlayingMidiSequence || this.midiNotes.length === 0) {
+            return;
+        }
 
-        this.midiPlaybackInterval = setInterval(() => {
+        this.isPlayingMidiSequence = true;
+        console.log('Starting continuous MIDI playback (motion above threshold)');
+
+        // Main playback loop
+        while (this.isPlayingMidiSequence) {
+            // Check if still in MIDI mode and IMU is active
+            if (this.playbackMode !== 'MIDI' || !this.isImuPlaying) {
+                break;
+            }
+
+            // Get current note
             if (this.currentNoteIndex >= this.midiNotes.length) {
-                this.currentNoteIndex = 0;
+                this.currentNoteIndex = 0; // Loop back
             }
 
             const note = this.midiNotes[this.currentNoteIndex];
+            console.log(`Playing note ${this.currentNoteIndex + 1}/${this.midiNotes.length}: pitch=${note.pitch}, duration=${note.duration}ms`);
+
+            // Play the note
             this.playMidiNote(note);
-            this.currentNoteIndex++;
 
+            // Update UI
             document.getElementById('currentNote').textContent =
-                `${this.currentNoteIndex}/${this.midiNotes.length}`;
+                `${this.currentNoteIndex + 1}/${this.midiNotes.length}`;
 
-        }, 600); // Simple fixed interval for demo
+            // Wait for note duration before playing next note
+            await this.sleep(note.duration);
+
+            // Move to next note
+            this.currentNoteIndex++;
+        }
+
+        this.isPlayingMidiSequence = false;
+        console.log('Continuous MIDI playback stopped');
+    }
+
+    stopContinuousMidiPlayback() {
+        this.isPlayingMidiSequence = false;
+        this.stopCurrentMidiNote();
+        console.log('Stopping continuous MIDI playback');
+    }
+
+    // For test playback - plays notes sequentially based on their duration
+    async startTestMidiPlayback() {
+        if (this.midiNotes.length === 0) {
+            console.warn('No MIDI notes loaded');
+            return;
+        }
+
+        this.isPlayingMidiSequence = true;
+        this.currentNoteIndex = 0;
+
+        await this.playNextMidiNoteInSequence();
+    }
+
+    async playNextMidiNoteInSequence() {
+        if (!this.isTestPlaying) {
+            console.log('Test playback stopped, stopping sequence');
+            this.isPlayingMidiSequence = false;
+            return;
+        }
+
+        if (this.midiNotes.length === 0) {
+            console.warn('No MIDI notes loaded');
+            return;
+        }
+
+        // Check if we've reached the end
+        if (this.currentNoteIndex >= this.midiNotes.length) {
+            // Loop back to start
+            this.currentNoteIndex = 0;
+            console.log('Reached end, looping back to start');
+        }
+
+        const note = this.midiNotes[this.currentNoteIndex];
+        console.log(`Test playback note ${this.currentNoteIndex + 1}/${this.midiNotes.length}: pitch=${note.pitch}, duration=${note.duration}ms`);
+
+        // Play the note
+        this.playMidiNote(note);
+
+        // Update UI
+        document.getElementById('currentNote').textContent =
+            `${this.currentNoteIndex + 1}/${this.midiNotes.length}`;
+
+        // Wait for note duration
+        await this.sleep(note.duration);
+
+        // Move to next note
+        this.currentNoteIndex++;
+
+        // Play next note
+        if (this.isTestPlaying) {
+            await this.playNextMidiNoteInSequence();
+        } else {
+            this.isPlayingMidiSequence = false;
+        }
     }
 
     stopMidiPlayback() {
-        if (this.midiPlaybackInterval) {
-            clearInterval(this.midiPlaybackInterval);
-            this.midiPlaybackInterval = null;
-        }
-
-        // Stop any currently playing note
+        this.isPlayingMidiSequence = false;
         this.stopCurrentMidiNote();
+    }
+
+    // Helper function to sleep/delay
+    sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     stopCurrentMidiNote() {
@@ -904,10 +1077,10 @@ class ViolinPlayer {
 
             // Start test playback
             if (this.playbackMode === 'MP3') {
-                this.audioElement.volume = this.maxVolume;
+                this.setAudioVolume(this.maxVolume);
                 this.audioElement.play().catch(e => console.log('Play error:', e));
             } else {
-                this.startMidiPlayback();
+                this.startTestMidiPlayback();
             }
         } else {
             btn.textContent = 'Test Playback (Preview)';
@@ -1500,6 +1673,20 @@ class ViolinPlayer {
         // Initial UI state
         document.getElementById('maxVolumeValue').textContent = Math.round(this.maxVolume * 100);
         document.getElementById('motionThresholdValue').textContent = Math.round(this.motionThreshold * 100);
+
+        // Show warning if volume control is not supported
+        if (!this.volumeSupported) {
+            const volumeSection = document.querySelector('.volume-section');
+            if (volumeSection) {
+                const warning = document.createElement('div');
+                warning.className = 'compatibility-warning';
+                warning.innerHTML = `
+                    <span class="warning-icon">⚠️</span>
+                    <span>Volume control may be limited on this browser. Using alternative methods.</span>
+                `;
+                volumeSection.insertBefore(warning, volumeSection.firstChild.nextSibling);
+            }
+        }
     }
 
     // ===== MODALS =====
