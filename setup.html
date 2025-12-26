@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Setup Guide - Hysilens Violin Player</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 40px auto;
+            padding: 20px;
+            line-height: 1.6;
+            background: #f5f5f5;
+        }
+        h1 { color: #6366f1; }
+        h2 { color: #8b5cf6; margin-top: 30px; }
+        .card {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            margin: 20px 0;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        code {
+            background: #f0f0f0;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+        }
+        pre {
+            background: #2d2d2d;
+            color: #f8f8f8;
+            padding: 16px;
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 12px;
+            margin: 16px 0;
+        }
+        .success {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 12px;
+            margin: 16px 0;
+        }
+        .btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #6366f1;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 600;
+            margin: 10px 10px 10px 0;
+        }
+        .btn:hover {
+            background: #4f46e5;
+        }
+        ul { padding-left: 24px; }
+        li { margin: 8px 0; }
+    </style>
+</head>
+<body>
+    <h1>🎻 Hysilens Violin Player - Setup Guide</h1>
+
+    <div class="card">
+        <h2>📋 Prerequisites</h2>
+        <ul>
+            <li><strong>Browser:</strong> Chrome or Edge (version 79 or later)</li>
+            <li><strong>Device:</strong> Arduino Nano 33 IoT (or compatible BLE device)</li>
+            <li><strong>Connection:</strong> Bluetooth enabled on your computer</li>
+            <li><strong>Server:</strong> Local web server (for development)</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>🚀 Quick Start</h2>
+
+        <h3>Step 1: Start a Local Server</h3>
+        <p>Choose one of these methods:</p>
+
+        <p><strong>Python 3:</strong></p>
+        <pre>cd web
+python -m http.server 8000</pre>
+
+        <p><strong>Node.js (http-server):</strong></p>
+        <pre>cd web
+npx http-server</pre>
+
+        <p><strong>PHP:</strong></p>
+        <pre>cd web
+php -S localhost:8000</pre>
+
+        <h3>Step 2: Open the App</h3>
+        <p>Navigate to: <code>http://localhost:8000</code></p>
+
+        <h3>Step 3: Connect Arduino</h3>
+        <ol>
+            <li>Power on your Arduino Nano 33 IoT</li>
+            <li>Click "Connect Arduino" in the web app</li>
+            <li>Select your device from the browser's Bluetooth dialog</li>
+            <li>Choose a characteristic with NOTIFY capability</li>
+            <li>Start playing!</li>
+        </ol>
+    </div>
+
+    <div class="card">
+        <h2>⚙️ Arduino Setup</h2>
+
+        <p>Your Arduino should broadcast IMU data via BLE in this format:</p>
+        <pre>ax,ay,az,gx,gy,gz\n</pre>
+
+        <p>Example Arduino sketch structure:</p>
+        <pre>
+#include &lt;ArduinoBLE.h&gt;
+#include &lt;Arduino_LSM6DS3.h&gt;
+
+BLEService imuService("19B10000-E8F2-537E-4F6C-D104768A1214");
+BLECharacteristic imuChar("19B10001-E8F2-537E-4F6C-D104768A1214",
+                          BLERead | BLENotify, 512);
+
+void setup() {
+  BLE.begin();
+  IMU.begin();
+  BLE.setLocalName("Violin IMU");
+  BLE.setAdvertisedService(imuService);
+  imuService.addCharacteristic(imuChar);
+  BLE.addService(imuService);
+  BLE.advertise();
+}
+
+void loop() {
+  float ax, ay, az, gx, gy, gz;
+  if (IMU.accelerationAvailable()) {
+    IMU.readAcceleration(ax, ay, az);
+    IMU.readGyroscope(gx, gy, gz);
+
+    String data = String(ax) + "," + String(ay) + "," +
+                  String(az) + "," + String(gx) + "," +
+                  String(gy) + "," + String(gz) + "\n";
+
+    imuChar.writeValue(data.c_str());
+  }
+  delay(100);
+}
+        </pre>
+    </div>
+
+    <div class="card">
+        <h2>🎵 Adding Audio Files</h2>
+
+        <h3>Method 1: Select Files Directly</h3>
+        <p>Click "Select MP3 File" in the app and choose any MP3 from your computer.</p>
+
+        <h3>Method 2: Built-in Tracks</h3>
+        <ol>
+            <li>Place MP3 files in the <code>web/tracks/</code> directory</li>
+            <li>Edit <code>app.js</code> and add to the tracks array:</li>
+        </ol>
+        <pre>
+const tracks = [
+    { name: "Your Track", url: "tracks/your_file.mp3" },
+    { name: "Another Track", url: "tracks/another.mp3" }
+];
+        </pre>
+    </div>
+
+    <div class="card">
+        <h2>🔧 Configuration</h2>
+
+        <h3>Motion Sensitivity</h3>
+        <p>Adjust these values in <code>app.js</code>:</p>
+        <pre>
+this.MAX_MOTION_SPEED = 250.0;  // Max motion reference
+this.motionThreshold = 0.15;    // 15% default threshold
+this.maxHistorySize = 5;        // Smoothing window
+        </pre>
+
+        <h3>Volume Gradient</h3>
+        <p>The app uses an ease-in-out curve for natural volume transitions:</p>
+        <ul>
+            <li>Above threshold: Full volume</li>
+            <li>Below threshold: Smooth gradient</li>
+            <li>Very low motion: Automatic pause</li>
+        </ul>
+    </div>
+
+    <div class="warning">
+        <strong>⚠️ Important Notes:</strong>
+        <ul>
+            <li>Web Bluetooth requires HTTPS in production (localhost is exempt)</li>
+            <li>Only Chrome and Edge support Web Bluetooth API</li>
+            <li>Keep the Arduino device close for stable connection</li>
+            <li>First connection requires user interaction (button click)</li>
+        </ul>
+    </div>
+
+    <div class="card">
+        <h2>🐛 Troubleshooting</h2>
+
+        <h3>Can't Connect to Device</h3>
+        <ul>
+            <li>Ensure Bluetooth is enabled on your computer</li>
+            <li>Verify the Arduino is powered and advertising</li>
+            <li>Try refreshing the page and reconnecting</li>
+            <li>Check browser console (F12) for error messages</li>
+        </ul>
+
+        <h3>No Audio Playing</h3>
+        <ul>
+            <li>Check that IMU Playback toggle is ON (green)</li>
+            <li>Verify motion speed exceeds the threshold</li>
+            <li>Try Test Playback to verify audio file loads</li>
+            <li>Check browser audio permissions</li>
+        </ul>
+
+        <h3>Jerky Motion Detection</h3>
+        <ul>
+            <li>Increase motion smoothing: <code>this.maxHistorySize = 10</code></li>
+            <li>Adjust threshold to higher value for stability</li>
+            <li>Ensure stable Bluetooth connection</li>
+        </ul>
+    </div>
+
+    <div class="success">
+        <strong>✅ Quick Test:</strong>
+        <ol>
+            <li>Open the app at <code>localhost:8000</code></li>
+            <li>Click "Connect Arduino" and select your device</li>
+            <li>Choose a characteristic with NOTIFY</li>
+            <li>You should see IMU data updating in real-time</li>
+            <li>Load an audio file and toggle "IMU Playback" on</li>
+            <li>Move the device - audio should respond!</li>
+        </ol>
+    </div>
+
+    <div class="card">
+        <h2>📚 Additional Resources</h2>
+        <ul>
+            <li><a href="https://developer.mozilla.org/en-US/docs/Web/API/Web_Bluetooth_API" target="_blank">Web Bluetooth API Documentation</a></li>
+            <li><a href="https://www.arduino.cc/en/Reference/ArduinoBLE" target="_blank">Arduino BLE Library</a></li>
+            <li><a href="https://github.com/WebBluetoothCG/demos" target="_blank">Web Bluetooth Examples</a></li>
+        </ul>
+    </div>
+
+    <div style="text-align: center; margin-top: 40px;">
+        <a href="index.html" class="btn">Open Violin Player</a>
+        <a href="README.md" class="btn" style="background: #8b5cf6;">View README</a>
+    </div>
+
+    <footer style="text-align: center; color: #666; margin-top: 40px; padding: 20px;">
+        <p>Hysilens Violin Player - Web Edition</p>
+        <p>Requires Chrome/Edge with Web Bluetooth API support</p>
+    </footer>
+</body>
+</html>
+

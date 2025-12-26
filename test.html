@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Bluetooth Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            text-align: center;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .card {
+            background: white;
+            padding: 40px;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 { color: #333; margin-bottom: 20px; }
+        .status {
+            font-size: 48px;
+            margin: 20px 0;
+        }
+        .result {
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+        .success {
+            background: #d4edda;
+            color: #155724;
+            border: 2px solid #c3e6cb;
+        }
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 2px solid #f5c6cb;
+        }
+        .info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 2px solid #bee5eb;
+            font-size: 14px;
+            text-align: left;
+        }
+        button {
+            padding: 12px 32px;
+            font-size: 16px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            margin: 10px;
+        }
+        button:hover {
+            background: #5568d3;
+        }
+        ul {
+            text-align: left;
+            margin: 0;
+            padding-left: 20px;
+        }
+        a {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🔵 Web Bluetooth Support Test</h1>
+        <div id="statusIcon" class="status">🔍</div>
+        <div id="result"></div>
+        <div id="details"></div>
+        <div id="actions"></div>
+    </div>
+
+    <script>
+        function checkSupport() {
+            const resultDiv = document.getElementById('result');
+            const detailsDiv = document.getElementById('details');
+            const actionsDiv = document.getElementById('actions');
+            const statusIcon = document.getElementById('statusIcon');
+
+            if (navigator.bluetooth) {
+                statusIcon.textContent = '✅';
+                resultDiv.className = 'result success';
+                resultDiv.innerHTML = '<strong>Success!</strong> Your browser supports Web Bluetooth API.';
+
+                detailsDiv.className = 'result info';
+                detailsDiv.innerHTML = `
+                    <strong>Browser Information:</strong><br>
+                    Browser: ${navigator.userAgent.match(/Chrome|Edge|Opera/i)?.[0] || 'Unknown'}<br>
+                    Platform: ${navigator.platform}<br>
+                    <br>
+                    <strong>Next Steps:</strong>
+                    <ul>
+                        <li>Ensure Bluetooth is enabled on your device</li>
+                        <li>Make sure you're using HTTPS (or localhost)</li>
+                        <li>Power on your Arduino BLE device</li>
+                        <li>Click the button below to test connection</li>
+                    </ul>
+                `;
+
+                actionsDiv.innerHTML = `
+                    <button onclick="testConnection()">Test Bluetooth Connection</button>
+                    <button onclick="window.location.href='index.html'">Open Violin Player</button>
+                `;
+            } else {
+                statusIcon.textContent = '❌';
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = '<strong>Not Supported</strong><br>Your browser does not support Web Bluetooth API.';
+
+                detailsDiv.className = 'result info';
+                detailsDiv.innerHTML = `
+                    <strong>Solutions:</strong>
+                    <ul>
+                        <li>Use Google Chrome (version 79 or later)</li>
+                        <li>Use Microsoft Edge (version 79 or later)</li>
+                        <li>Use Opera (version 66 or later)</li>
+                        <li>Update your browser to the latest version</li>
+                    </ul>
+                    <br>
+                    <strong>Note:</strong> Firefox and Safari do not support Web Bluetooth API.
+                    <br><br>
+                    <a href="https://caniuse.com/web-bluetooth" target="_blank">Check browser compatibility →</a>
+                `;
+
+                actionsDiv.innerHTML = `
+                    <button onclick="location.reload()">Retry Check</button>
+                `;
+            }
+        }
+
+        async function testConnection() {
+            const resultDiv = document.getElementById('result');
+            const statusIcon = document.getElementById('statusIcon');
+
+            try {
+                statusIcon.textContent = '🔄';
+                resultDiv.className = 'result info';
+                resultDiv.innerHTML = 'Requesting Bluetooth device... Please select a device from the dialog.';
+
+                const device = await navigator.bluetooth.requestDevice({
+                    acceptAllDevices: true,
+                    optionalServices: ['generic_access', 'generic_attribute']
+                });
+
+                statusIcon.textContent = '🎉';
+                resultDiv.className = 'result success';
+                resultDiv.innerHTML = `
+                    <strong>Connection Test Successful!</strong><br>
+                    Device: ${device.name || 'Unnamed Device'}<br>
+                    ID: ${device.id}<br>
+                    <br>
+                    Your browser can successfully connect to BLE devices!
+                `;
+
+                document.getElementById('details').innerHTML = `
+                    <div class="result info">
+                        <strong>Everything is working!</strong><br>
+                        You're ready to use the Violin Player app.<br>
+                        <br>
+                        Click the button below to get started.
+                    </div>
+                `;
+
+                document.getElementById('actions').innerHTML = `
+                    <button onclick="window.location.href='index.html'" style="background: #28a745;">
+                        🎻 Open Violin Player
+                    </button>
+                    <button onclick="testConnection()">Test Again</button>
+                `;
+
+            } catch (error) {
+                statusIcon.textContent = '⚠️';
+                resultDiv.className = 'result error';
+                resultDiv.innerHTML = `
+                    <strong>Connection Test Failed</strong><br>
+                    Error: ${error.message}<br>
+                    <br>
+                    Common issues:<br>
+                    <ul style="text-align: left; margin-top: 10px;">
+                        <li>No device selected (user cancelled)</li>
+                        <li>Bluetooth is disabled</li>
+                        <li>Device is out of range</li>
+                        <li>Insufficient permissions</li>
+                    </ul>
+                `;
+            }
+        }
+
+        // Run check on page load
+        window.addEventListener('DOMContentLoaded', checkSupport);
+    </script>
+</body>
+</html>
+
