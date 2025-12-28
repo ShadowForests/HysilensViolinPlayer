@@ -88,14 +88,17 @@
                 <div class="control-group">
                     <div class="control-row">
                         <span class="label">Playback Mode:</span>
-                        <button id="playbackModeBtn" class="btn btn-mode">MP3</button>
+                    </div>
+                    <div class="button-group-full">
+                        <button id="mp3ModeBtn" class="btn btn-mode active">MP3</button>
+                        <button id="midiModeBtn" class="btn btn-mode">MIDI</button>
                     </div>
                 </div>
 
                 <div class="divider"></div>
 
                 <!-- MP3 Track Selection -->
-                <div class="control-group">
+                <div id="mp3Controls" class="control-group">
                     <div class="control-row">
                         <span class="label">Current Track:</span>
                         <span id="trackName" class="track-name">No Track</span>
@@ -109,8 +112,6 @@
 
                 <!-- MIDI File Selection (shown in MIDI mode) -->
                 <div id="midiControls" class="control-group" style="display: none;">
-                    <div class="divider"></div>
-
                     <div class="control-row">
                         <span class="label">MIDI File:</span>
                         <span id="midiFileName" class="track-name">No MIDI File</span>
@@ -136,6 +137,19 @@
                     <div class="button-group-full">
                         <button id="imuPlaybackBtn" class="btn btn-toggle active">Pause IMU Playback</button>
                         <button id="testPlaybackBtn" class="btn btn-secondary">Test Playback (Preview)</button>
+                    </div>
+                </div>
+
+                <!-- Restart with Delay -->
+                <div class="divider"></div>
+
+                <div class="control-group">
+                    <div class="restart-control">
+                        <div class="restart-input-group">
+                            <input type="number" id="restartDelayInput" class="delay-input" min="0" max="60" value="3" placeholder="3">
+                            <span class="delay-label">seconds</span>
+                            <button id="restartWithDelayBtn" class="btn btn-primary">Restart, Wait, & Start IMU</button>
+                        </div>
                     </div>
                 </div>
 

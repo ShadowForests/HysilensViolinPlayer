@@ -579,8 +579,9 @@ class ViolinPlayer {
         document.getElementById('connectBtn').addEventListener('click', () => this.connectDevice());
         document.getElementById('disconnectBtn').addEventListener('click', () => this.disconnect());
 
-        // Playback mode
-        document.getElementById('playbackModeBtn').addEventListener('click', () => this.togglePlaybackMode());
+        // Playback mode buttons
+        document.getElementById('mp3ModeBtn').addEventListener('click', () => this.setPlaybackMode('MP3'));
+        document.getElementById('midiModeBtn').addEventListener('click', () => this.setPlaybackMode('MIDI'));
 
         // Track selection
         document.getElementById('selectFileBtn').addEventListener('click', () => {
@@ -605,6 +606,9 @@ class ViolinPlayer {
 
         // Test playback
         document.getElementById('testPlaybackBtn').addEventListener('click', () => this.toggleTestPlayback());
+
+        // Restart with delay
+        document.getElementById('restartWithDelayBtn').addEventListener('click', () => this.restartWithDelay());
 
         // Seek slider
         document.getElementById('seekSlider').addEventListener('input', (e) => this.seekTo(e.target.value));
@@ -1476,11 +1480,29 @@ class ViolinPlayer {
 
     // ===== PLAYBACK CONTROL =====
 
-    togglePlaybackMode() {
-        this.playbackMode = this.playbackMode === 'MP3' ? 'MIDI' : 'MP3';
-        const btn = document.getElementById('playbackModeBtn');
-        btn.textContent = this.playbackMode;
-        btn.style.background = this.playbackMode === 'MIDI' ? '#8b5cf6' : '#6366f1';
+    setPlaybackMode(mode) {
+        // Only change if it's different
+        if (this.playbackMode === mode) {
+            return;
+        }
+
+        this.playbackMode = mode;
+
+        // Update button states
+        const mp3Btn = document.getElementById('mp3ModeBtn');
+        const midiBtn = document.getElementById('midiModeBtn');
+
+        if (mode === 'MP3') {
+            mp3Btn.classList.add('active');
+            midiBtn.classList.remove('active');
+        } else {
+            mp3Btn.classList.remove('active');
+            midiBtn.classList.add('active');
+        }
+
+        // Show/hide MIDI controls
+        document.getElementById('mp3Controls').style.display =
+            this.playbackMode === 'MP3' ? 'block' : 'none';
 
         // Show/hide MIDI controls
         document.getElementById('midiControls').style.display =
@@ -1492,6 +1514,8 @@ class ViolinPlayer {
         } else {
             this.stopMidiPlayback();
         }
+
+        console.log(`🎵 Playback mode changed to: ${mode}`);
     }
 
     handleFileSelect(event) {
@@ -1685,6 +1709,110 @@ class ViolinPlayer {
     seekTo(position) {
         if (this.audioElement.src) {
             this.audioElement.currentTime = position;
+        }
+    }
+
+    async restartWithDelay() {
+        console.log('=== Restart with Delay Started ===');
+
+        // Get delay time from input
+        const delayInput = document.getElementById('restartDelayInput');
+        const delaySeconds = parseFloat(delayInput.value) || 3;
+
+        if (delaySeconds < 0 || delaySeconds > 60) {
+            console.error('Delay must be between 0 and 60 seconds');
+            alert('Please enter a delay between 0 and 60 seconds');
+            return;
+        }
+
+        const btn = document.getElementById('restartWithDelayBtn');
+
+        try {
+            // Disable button during process
+            btn.disabled = true;
+            btn.textContent = 'Restarting...';
+
+            // Stop any current playback
+            if (this.isTestPlaying) {
+                this.isTestPlaying = false;
+                const testBtn = document.getElementById('testPlaybackBtn');
+                testBtn.textContent = 'Test Playback (Preview)';
+                testBtn.classList.remove('active');
+            }
+
+            // Stop IMU playback if active
+            if (this.isImuPlaying) {
+                this.isImuPlaying = false;
+                const imuBtn = document.getElementById('imuPlaybackBtn');
+                imuBtn.textContent = 'Play IMU Playback';
+                imuBtn.classList.add('inactive');
+            }
+
+            // Pause audio and reset position
+            if (this.playbackMode === 'MP3') {
+                this.audioElement.pause();
+                this.audioElement.currentTime = 0;
+                console.log('🔄 Song restarted to position 0');
+            } else {
+                this.stopMidiPlayback();
+                console.log('🔄 MIDI playback stopped');
+            }
+
+            // Stop MIDI if in MIDI mode
+            if (this.playbackMode === 'MIDI') {
+                this.stopMidiPlayback();
+            }
+
+            // Update UI to show waiting
+            btn.textContent = `Waiting ${delaySeconds}s...`;
+
+            // Wait for the specified delay
+            console.log(`⏳ Waiting ${delaySeconds} seconds before starting IMU playback...`);
+
+            // Countdown display
+            for (let i = delaySeconds; i > 0; i--) {
+                btn.textContent = `Starting in ${i}s...`;
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+
+            // Resume AudioContext on iOS if needed
+            if (this.audioContext.state === 'suspended') {
+                console.log('🔊 Resuming AudioContext for iOS...');
+                await this.audioContext.resume();
+            }
+
+            // Setup Web Audio API if needed
+            if (this.needsWebAudioVolume && !this.usingWebAudioVolume && this.audioElement.src) {
+                console.log('🔊 Setting up Web Audio API for IMU playback...');
+                await this.setupWebAudioVolume();
+            }
+
+            // Start IMU playback
+            this.isImuPlaying = true;
+            const imuBtn = document.getElementById('imuPlaybackBtn');
+            imuBtn.textContent = 'Pause IMU Playback';
+            imuBtn.classList.remove('inactive');
+            imuBtn.classList.add('active');
+
+            // Start audio playback if track is loaded
+            if (this.audioElement.src && this.playbackMode === 'MP3') {
+                this.audioElement.play().catch(e => console.log('Play error:', e));
+                console.log('✅ IMU playback started!');
+            } else if (this.playbackMode === 'MIDI') {
+                console.log('✅ IMU MIDI playback ready!');
+            }
+
+            // Reset button
+            btn.textContent = 'Restart, Wait, & Start IMU';
+            console.log('=== Restart with Delay Complete ===');
+
+        } catch (error) {
+            console.error('❌ Error during restart with delay:', error);
+            btn.textContent = 'Restart, Wait, & Start IMU';
+            alert(`Error: ${error.message}`);
+        } finally {
+            // Re-enable button
+            btn.disabled = false;
         }
     }
 
