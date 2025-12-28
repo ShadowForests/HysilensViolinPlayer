@@ -118,10 +118,25 @@ class ViolinPlayer {
 
         this.audioElement = new Audio();
         this.audioElement.loop = true;
+
+        // Enable background audio playback for iOS
+        // This prevents audio from stopping when browser is minimized or screen is off
+        this.audioElement.setAttribute('playsinline', '');
+        this.audioElement.setAttribute('webkit-playsinline', '');
+
+        // Set audio element to not pause on background (iOS Safari)
+        if ('mediaSession' in navigator) {
+            // Enable media session for background playback
+            this.setupMediaSession();
+        }
+
         console.log('Audio element created:', !!this.audioElement ? 'YES ✅' : 'NO ❌');
 
         this.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
         console.log('iOS detected:', this.isIOS ? 'YES ✅' : 'NO ❌');
+
+        // Setup background audio support
+        this.setupBackgroundAudioSupport();
 
         // Check if volume control is supported
         this.volumeSupported = this.checkVolumeSupport();
@@ -307,6 +322,140 @@ class ViolinPlayer {
             console.log('Result: FAILED');
             console.log('========================================');
             return false;
+        }
+    }
+
+    // Setup background audio support for iOS
+    setupBackgroundAudioSupport() {
+        console.log('=== Setting up Background Audio Support ===');
+
+        // Handle visibility change events
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                console.log('📱 App minimized/backgrounded');
+                // Keep audio playing - don't pause
+                if (this.isImuPlaying && this.audioElement.src && this.audioElement.paused) {
+                    console.log('🔊 Resuming audio in background');
+                    this.audioElement.play().catch(e => console.log('Background play error:', e));
+                }
+            } else {
+                console.log('📱 App foregrounded');
+                // Resume AudioContext if suspended
+                if (this.audioContext && this.audioContext.state === 'suspended') {
+                    this.audioContext.resume().then(() => {
+                        console.log('🔊 AudioContext resumed on foreground');
+                    });
+                }
+            }
+        });
+
+        // Handle page hide/show events (iOS specific)
+        window.addEventListener('pagehide', (e) => {
+            console.log('📱 Page hidden');
+            // Don't stop audio on page hide
+        });
+
+        window.addEventListener('pageshow', (e) => {
+            console.log('📱 Page shown');
+            if (e.persisted) {
+                // Page was restored from cache
+                console.log('📱 Page restored from cache');
+                if (this.isImuPlaying && this.audioElement.src && this.audioElement.paused) {
+                    this.audioElement.play().catch(err => console.log('Resume error:', err));
+                }
+            }
+        });
+
+        // Prevent audio from stopping when screen locks (iOS Safari)
+        // Request wake lock if available
+        if ('wakeLock' in navigator) {
+            this.requestWakeLock();
+        }
+
+        console.log('✅ Background audio support configured');
+        console.log('========================================');
+    }
+
+    // Setup Media Session API for background audio controls
+    setupMediaSession() {
+        if (!('mediaSession' in navigator)) {
+            console.log('Media Session API not supported');
+            return;
+        }
+
+        console.log('=== Setting up Media Session API ===');
+
+        // Set metadata
+        navigator.mediaSession.metadata = new MediaMetadata({
+            title: 'Hysilens Violin Player',
+            artist: 'IMU Motion Control',
+            album: 'Violin Performance',
+            artwork: [
+                { src: 'icon-96.png', sizes: '96x96', type: 'image/png' },
+                { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
+                { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }
+            ]
+        });
+
+        // Set up action handlers
+        navigator.mediaSession.setActionHandler('play', () => {
+            console.log('Media Session: Play');
+            if (!this.isImuPlaying) {
+                this.toggleImuPlayback();
+            }
+        });
+
+        navigator.mediaSession.setActionHandler('pause', () => {
+            console.log('Media Session: Pause');
+            if (this.isImuPlaying) {
+                this.toggleImuPlayback();
+            }
+        });
+
+        navigator.mediaSession.setActionHandler('stop', () => {
+            console.log('Media Session: Stop');
+            if (this.isImuPlaying) {
+                this.toggleImuPlayback();
+            }
+        });
+
+        // Seek handlers
+        navigator.mediaSession.setActionHandler('seekto', (details) => {
+            console.log('Media Session: Seek to', details.seekTime);
+            if (this.audioElement.src) {
+                this.audioElement.currentTime = details.seekTime;
+            }
+        });
+
+        console.log('✅ Media Session API configured');
+    }
+
+    // Request wake lock to keep screen and audio active
+    async requestWakeLock() {
+        try {
+            if ('wakeLock' in navigator) {
+                this.wakeLock = await navigator.wakeLock.request('screen');
+                console.log('✅ Wake Lock acquired');
+
+                // Re-acquire wake lock when visibility changes
+                this.wakeLock.addEventListener('release', () => {
+                    console.log('Wake Lock released');
+                });
+
+                // Re-request on visibility change
+                document.addEventListener('visibilitychange', async () => {
+                    if (!document.hidden && this.isImuPlaying) {
+                        try {
+                            this.wakeLock = await navigator.wakeLock.request('screen');
+                            console.log('✅ Wake Lock re-acquired');
+                        } catch (e) {
+                            console.log('Wake Lock re-acquire failed:', e.message);
+                        }
+                    }
+                });
+            }
+        } catch (err) {
+            console.log('Wake Lock not available:', err.message);
         }
     }
 
@@ -1339,10 +1488,14 @@ class ViolinPlayer {
                 const shouldPause = targetVolume < (this.maxVolume * 0.05);
 
                 if (shouldPause) {
-                    if (!this.audioElement.paused) {
+                    // Fade to 0, but only pause once volume actually reaches 0
+                    this.smoothSetAudioVolume(0);
+
+                    // Check if smoothed volume has reached 0 before pausing
+                    if (this.smoothedVolume < 0.01 && !this.audioElement.paused) {
                         this.forcePause();
+                        console.log('🔇 Audio paused after fade-out complete');
                     }
-                    this.smoothSetAudioVolume(0); // Gradual fade-out to 0
                 } else {
                     if (this.audioElement.paused) {
                         this.audioElement.play().catch(e => console.log('Play error:', e));
