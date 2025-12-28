@@ -23,7 +23,7 @@ class ViolinPlayer {
         this.needsWebAudioVolume = false; // Flag to setup Web Audio when audio loads
         this.currentTrack = null;
         this.isTestPlaying = false;
-        this.isImuPlaying = true; // Default to true
+        this.isImuPlaying = false; // Default to false - starts paused until Bluetooth connected
         this.onMetadataLoaded = null; // Track metadata listener to prevent duplicates
 
         // IMU Data
@@ -870,9 +870,33 @@ class ViolinPlayer {
             // Send initial volume level to Arduino
             this.sendVolumeToArduino();
 
-            // Start audio if IMU playback is on
-            if (this.isImuPlaying && this.audioElement.src) {
+            // Automatically start IMU playback after successful connection
+            console.log('🎵 Auto-starting IMU playback after Bluetooth connection...');
+            this.isImuPlaying = true;
+            const imuBtn = document.getElementById('imuPlaybackBtn');
+            imuBtn.textContent = 'Pause IMU Playback';
+            imuBtn.classList.remove('inactive');
+            imuBtn.classList.add('active');
+
+            // Start audio if track is loaded
+            if (this.audioElement.src) {
+                // Resume AudioContext if needed
+                if (this.audioContext.state === 'suspended') {
+                    console.log('🔊 Resuming AudioContext...');
+                    await this.audioContext.resume();
+                }
+
+                // Setup Web Audio API if needed
+                if (this.needsWebAudioVolume && !this.usingWebAudioVolume) {
+                    console.log('🔊 Setting up Web Audio API...');
+                    await this.setupWebAudioVolume();
+                }
+
+                // Start playback
                 this.audioElement.play().catch(e => console.log('Audio play error:', e));
+                console.log('✅ IMU playback auto-started!');
+            } else {
+                console.log('ℹ️ IMU playback enabled, waiting for audio track to be loaded');
             }
 
         } catch (error) {
