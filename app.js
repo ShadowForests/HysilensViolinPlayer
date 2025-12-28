@@ -108,12 +108,14 @@ class ViolinPlayer {
         this.audioElement.loop = true;
         console.log('Audio element created:', !!this.audioElement ? 'YES ✅' : 'NO ❌');
 
-        // Detect iOS specifically (iOS always blocks volume control)
         this.isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
         console.log('iOS detected:', this.isIOS ? 'YES ✅' : 'NO ❌');
 
         // Check if volume control is supported
         this.volumeSupported = this.checkVolumeSupport();
+        if (this.isIOS) {
+            this.volumeSupported = false;
+        }
         console.log('HTML5 volume control supported:', this.volumeSupported ? 'YES ✅' : 'NO ❌');
 
         // Check Web Audio API features for gain workaround
@@ -141,9 +143,9 @@ class ViolinPlayer {
         }
 
         console.log('--- Volume Control Strategy ---');
-        // On iOS or when volume not supported, prepare for Web Audio API
+        // When volume not supported, prepare for Web Audio API
         // Note: We can't create MediaElementSource until audio has a source
-        if (this.isIOS || !this.volumeSupported) {
+        if (!this.volumeSupported) {
             this.needsWebAudioVolume = true;
             console.log('🔊 SELECTED: Web Audio API gain workaround');
             console.log('  Reason:', this.isIOS ? 'iOS device detected' : 'HTML5 volume not writable');
@@ -165,8 +167,8 @@ class ViolinPlayer {
         this.loadViolinSample();
 
         // Log compatibility info
-        if (!this.volumeSupported || this.isIOS) {
-            console.warn('⚠️ Will use Web Audio API gain node for volume control (iOS or unsupported browser)');
+        if (!this.volumeSupported) {
+            console.warn('⚠️ Will use Web Audio API gain node for volume control (unsupported browser)');
         }
     }
 
@@ -192,7 +194,7 @@ class ViolinPlayer {
         }
     }
 
-    // Setup Web Audio API for volume control (required for iOS)
+    // Setup Web Audio API for volume control (required for unsupported browsers)
     async setupWebAudioVolume() {
         console.log('=== Setting up Web Audio Volume Control ===');
         try {
@@ -319,7 +321,7 @@ class ViolinPlayer {
         const shouldSendToArduino = isTransitionToZero || isTransitionToMax || (clampedVolume > 0 && clampedVolume < 1.0 && isSignificantChange);
 
         try {
-            // On iOS or when using Web Audio volume, use gain node with smooth ramping
+            // When using Web Audio volume, use gain node with smooth ramping
             if (this.usingWebAudioVolume && this.audioGainNode) {
                 this.setGainWithRamp(this.audioGainNode, clampedVolume);
 //                if (shouldLog) {
@@ -767,7 +769,7 @@ class ViolinPlayer {
         document.getElementById('imuSection').style.display = 'none';
 
         if (this.audioElement) {
-            this.audioElement.pause();
+            this.forcePause();
         }
     }
 
@@ -1080,7 +1082,7 @@ class ViolinPlayer {
         document.getElementById('imuSection').style.display = 'none';
 
         if (this.audioElement) {
-            this.audioElement.pause();
+            this.forcePause();
         }
     }
 
@@ -1206,7 +1208,7 @@ class ViolinPlayer {
 
                 if (shouldPause) {
                     if (!this.audioElement.paused) {
-                        this.audioElement.pause();
+                        this.forcePause();
                     }
                     this.setAudioVolume(0);
                 } else {
@@ -1510,7 +1512,7 @@ class ViolinPlayer {
 
         // Stop current playback
         if (this.playbackMode === 'MIDI') {
-            this.audioElement.pause();
+            this.forcePause();
         } else {
             this.stopMidiPlayback();
         }
@@ -1552,7 +1554,7 @@ class ViolinPlayer {
     loadTrack(url, name) {
         try {
             // Stop current playback
-            this.audioElement.pause();
+            this.forcePause();
             this.audioElement.currentTime = 0;
 
             // Revoke old object URL to free memory
@@ -1574,9 +1576,9 @@ class ViolinPlayer {
                 document.getElementById('seekSlider').max = this.audioElement.duration;
                 console.log(`MP3 loaded: duration=${this.audioElement.duration.toFixed(2)}s`);
 
-                // Setup Web Audio API for iOS after audio source is loaded
+                // Setup Web Audio API for unsupported browsers after audio source is loaded
                 if (this.needsWebAudioVolume && !this.usingWebAudioVolume) {
-                    console.log('🔊 Setting up Web Audio API for iOS...');
+                    console.log('🔊 Setting up Web Audio API for unsupported browsers...');
                     await this.setupWebAudioVolume();
                 }
             };
@@ -1602,6 +1604,13 @@ class ViolinPlayer {
         }
     }
 
+    async forcePause() {
+        this.audioElement.pause();
+        const lastTime = this.audioElement.currentTime;
+        this.audioElement.load(); // Reset the audio element
+        this.audioElement.currentTime = lastTime;
+    }
+
     async toggleImuPlayback() {
         this.isImuPlaying = !this.isImuPlaying;
         const btn = document.getElementById('imuPlaybackBtn');
@@ -1619,7 +1628,7 @@ class ViolinPlayer {
 
                 // Stop test playback audio
                 if (this.playbackMode === 'MP3') {
-                    this.audioElement.pause();
+                    this.forcePause();
                 } else {
                     this.stopMidiPlayback();
                 }
@@ -1627,13 +1636,13 @@ class ViolinPlayer {
                 console.log('Test playback stopped (IMU playback started)');
             }
 
-            // Resume AudioContext on iOS if needed
+            // Resume AudioContext on unsupported browsers if needed
             if (this.audioContext.state === 'suspended') {
-                console.log('🔊 Resuming AudioContext for iOS...');
+                console.log('🔊 Resuming AudioContext for unsupported browsers...');
                 await this.audioContext.resume();
             }
 
-            // Setup Web Audio API if needed (for iOS or when volume not supported)
+            // Setup Web Audio API if needed (for unsupported browsers or when volume not supported)
             if (this.needsWebAudioVolume && !this.usingWebAudioVolume && this.audioElement.src) {
                 console.log('🔊 Setting up Web Audio API for IMU playback...');
                 await this.setupWebAudioVolume();
@@ -1647,7 +1656,7 @@ class ViolinPlayer {
             btn.textContent = 'Play IMU Playback';
             btn.classList.add('inactive');
             if (this.playbackMode === 'MP3') {
-                this.audioElement.pause();
+                this.forcePause();
             } else {
                 this.stopMidiPlayback();
             }
@@ -1672,7 +1681,7 @@ class ViolinPlayer {
 
                 // Stop any IMU-controlled playback
                 if (this.playbackMode === 'MP3') {
-                    this.audioElement.pause();
+                    this.forcePause();
                 } else {
                     this.stopMidiPlayback();
                 }
@@ -1680,9 +1689,9 @@ class ViolinPlayer {
                 console.log('IMU playback paused (test playback started)');
             }
 
-            // Resume AudioContext on iOS if needed
+            // Resume AudioContext on unsupported browsers if needed
             if (this.audioContext.state === 'suspended') {
-                console.log('🔊 Resuming AudioContext for iOS...');
+                console.log('🔊 Resuming AudioContext for unsupported browsers...');
                 await this.audioContext.resume();
             }
 
@@ -1699,7 +1708,7 @@ class ViolinPlayer {
 
             // Stop test playback
             if (this.playbackMode === 'MP3') {
-                this.audioElement.pause();
+                this.forcePause();
             } else {
                 this.stopMidiPlayback();
             }
@@ -1750,7 +1759,7 @@ class ViolinPlayer {
 
             // Pause audio and reset position
             if (this.playbackMode === 'MP3') {
-                this.audioElement.pause();
+                this.forcePause();
                 this.audioElement.currentTime = 0;
                 console.log('🔄 Song restarted to position 0');
             } else {
@@ -1775,9 +1784,9 @@ class ViolinPlayer {
                 await new Promise(resolve => setTimeout(resolve, 1000));
             }
 
-            // Resume AudioContext on iOS if needed
+            // Resume AudioContext on unsupported browsers if needed
             if (this.audioContext.state === 'suspended') {
-                console.log('🔊 Resuming AudioContext for iOS...');
+                console.log('🔊 Resuming AudioContext for unsupported browsers...');
                 await this.audioContext.resume();
             }
 
