@@ -165,6 +165,31 @@
 
                 <div class="divider"></div>
 
+                <!-- Arduino Volume Feedback Toggle -->
+                <div class="control-group">
+                    <div class="toggle-control">
+                        <div class="toggle-header">
+                            <label for="arduinoVolumeFeedbackToggle">Arduino Volume Feedback</label>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="arduinoVolumeFeedbackToggle" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <p class="toggle-description">Send volume level to Arduino (0-100%)</p>
+                    </div>
+                </div>
+
+                <!-- Arduino Max Volume Scale -->
+                <div class="control-group">
+                    <div class="slider-control">
+                        <label for="arduinoMaxVolumeSlider">Arduino Max Volume Scale: <span id="arduinoMaxVolumeValue">100</span>%</label>
+                        <p class="slider-description">Scale the volume sent to Arduino (50% = scale by 0.5)</p>
+                        <input type="range" id="arduinoMaxVolumeSlider" class="slider" min="0" max="100" value="100">
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+
                 <!-- Motion Threshold -->
                 <div class="control-group">
                     <div class="slider-control">

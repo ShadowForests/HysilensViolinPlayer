@@ -10,6 +10,8 @@ class ViolinPlayer {
         this.bleBuffer = '';
         this.isConnecting = false; // Prevent multiple connection attempts
         this.disconnectListenerAdded = false; // Track if listener is already added
+        this.arduinoVolumeFeedbackEnabled = true; // Toggle for sending volume to Arduino
+        this.arduinoMaxVolumeScale = 1.0; // Scale factor for Arduino volume (0.0 - 1.0)
 
         // Audio
         this.audioContext = null;
@@ -299,18 +301,37 @@ class ViolinPlayer {
         // Clamp volume between 0 and 1
         const clampedVolume = Math.max(0, Math.min(1, volume));
 
+        // Track previous volume for Arduino updates
+        const previousVolume = this.currentVolume || 0;
+        this.currentVolume = clampedVolume;
+
         // Only log on significant volume changes (not every slider movement)
         const shouldLog = !this.lastLoggedVolume || Math.abs(clampedVolume - this.lastLoggedVolume) > 0.05;
+
+        // Send to Arduino logic:
+        // - Send when volume drops to 0 from non-zero (transition to mute)
+        // - Send when volume reaches maximum (1.0) from non-max (transition to max)
+        // - Send on significant changes (>2% difference) for other values
+        // - Don't send continuously when already at 0 or already at max
+        const isTransitionToZero = clampedVolume === 0 && previousVolume > 0;
+        const isTransitionToMax = clampedVolume === 1.0 && previousVolume < 1.0;
+        const isSignificantChange = Math.abs(clampedVolume - previousVolume) > 0.02;
+        const shouldSendToArduino = isTransitionToZero || isTransitionToMax || (clampedVolume > 0 && clampedVolume < 1.0 && isSignificantChange);
 
         try {
             // On iOS or when using Web Audio volume, use gain node with smooth ramping
             if (this.usingWebAudioVolume && this.audioGainNode) {
                 this.setGainWithRamp(this.audioGainNode, clampedVolume);
-                if (shouldLog) {
-                    console.log(`🔊 Volume set via Web Audio gain: ${(clampedVolume * 100).toFixed(0)}%`);
-                    console.log('  Method: Web Audio API GainNode (smooth ramp)');
-                    console.log('  Gain value:', clampedVolume.toFixed(3));
-                    this.lastLoggedVolume = clampedVolume;
+//                if (shouldLog) {
+//                    console.log(`🔊 Volume set via Web Audio gain: ${(clampedVolume * 100).toFixed(0)}%`);
+//                    console.log('  Method: Web Audio API GainNode (smooth ramp)');
+//                    console.log('  Gain value:', clampedVolume.toFixed(3));
+//                    this.lastLoggedVolume = clampedVolume;
+//                }
+
+                // Send to Arduino
+                if (shouldSendToArduino) {
+                    this.sendVolumeToArduino();
                 }
                 return true;
             }
@@ -321,17 +342,17 @@ class ViolinPlayer {
                 this.audioElement.volume = clampedVolume;
                 const after = this.audioElement.volume;
 
-                if (shouldLog) {
-                    console.log(`🔊 Volume set via HTML5: ${(clampedVolume * 100).toFixed(0)}%`);
-                    console.log('  Method: HTML5 Audio.volume property');
-                    console.log('  Requested:', clampedVolume.toFixed(3));
-                    console.log('  Actual:', after.toFixed(3));
-
-                    if (Math.abs(after - clampedVolume) > 0.01) {
-                        console.warn('  ⚠️ Volume may not be controllable (iOS?)');
-                    }
-                    this.lastLoggedVolume = clampedVolume;
-                }
+//                if (shouldLog) {
+//                    console.log(`🔊 Volume set via HTML5: ${(clampedVolume * 100).toFixed(0)}%`);
+//                    console.log('  Method: HTML5 Audio.volume property');
+//                    console.log('  Requested:', clampedVolume.toFixed(3));
+//                    console.log('  Actual:', after.toFixed(3));
+//
+//                    if (Math.abs(after - clampedVolume) > 0.01) {
+//                        console.warn('  ⚠️ Volume may not be controllable (iOS?)');
+//                    }
+//                    this.lastLoggedVolume = clampedVolume;
+//                }
             }
 
             // Fallback: Use Web Audio API gain node if available
@@ -340,6 +361,11 @@ class ViolinPlayer {
                     console.log(`🔊 Using fallback Web Audio gain`);
                 }
                 this.useWebAudioGain(clampedVolume);
+            }
+
+            // Send to Arduino
+            if (shouldSendToArduino) {
+                this.sendVolumeToArduino();
             }
 
             return true;
@@ -606,6 +632,19 @@ class ViolinPlayer {
             document.getElementById('motionThresholdValue').textContent = e.target.value;
         });
 
+        // Arduino Volume Feedback Toggle
+        document.getElementById('arduinoVolumeFeedbackToggle').addEventListener('change', (e) => this.toggleArduinoVolumeFeedback(e.target.checked));
+
+        // Arduino Max Volume Scale
+        document.getElementById('arduinoMaxVolumeSlider').addEventListener('input', (e) => {
+            this.arduinoMaxVolumeScale = e.target.value / 100;
+            document.getElementById('arduinoMaxVolumeValue').textContent = e.target.value;
+        });
+
+        document.getElementById('arduinoMaxVolumeSlider').addEventListener('change', (e) => {
+            console.log(`🔊 Arduino volume scale set to: ${e.target.value}% (scale: ${this.arduinoMaxVolumeScale.toFixed(2)})`);
+        });
+
         // Service modal
         document.getElementById('closeServiceModal').addEventListener('click', () => this.closeModal('serviceModal'));
 
@@ -822,6 +861,9 @@ class ViolinPlayer {
             document.getElementById('disconnectBtn').disabled = false;
             document.getElementById('imuSection').style.display = 'block';
 
+            // Send initial volume level to Arduino
+            this.sendVolumeToArduino();
+
             // Start audio if IMU playback is on
             if (this.isImuPlaying && this.audioElement.src) {
                 this.audioElement.play().catch(e => console.log('Audio play error:', e));
@@ -830,6 +872,109 @@ class ViolinPlayer {
         } catch (error) {
             console.error('Subscription error:', error);
             this.updateStatus('Subscription failed: ' + error.message);
+        }
+    }
+
+    // Send current volume level to Arduino (0-100)
+    async sendVolumeToArduino() {
+        if (!this.characteristic) {
+            console.warn('⚠️ Cannot send volume: No characteristic connected');
+            return false;
+        }
+
+        // Check if Arduino volume feedback is enabled
+        if (!this.arduinoVolumeFeedbackEnabled) {
+            return false; // Silently skip if disabled
+        }
+
+        try {
+            // Check if characteristic supports write
+            const canWrite = this.characteristic.properties.write ||
+                           this.characteristic.properties.writeWithoutResponse;
+
+            if (!canWrite) {
+                console.warn('⚠️ Characteristic does not support writing');
+                return false;
+            }
+
+            // Calculate volume as 0-100 with Arduino max volume scaling
+            const scaledVolume = this.currentVolume * this.arduinoMaxVolumeScale;
+            const volumePercent = Math.round(scaledVolume * 100);
+
+            // Create data packet: "VOL:XX\n" format
+            const message = `VOL:${volumePercent}\n`;
+            const encoder = new TextEncoder();
+            const data = encoder.encode(message);
+
+            // Send to Arduino
+            if (this.characteristic.properties.writeWithoutResponse) {
+                await this.characteristic.writeValueWithoutResponse(data);
+            } else {
+                await this.characteristic.writeValue(data);
+            }
+
+//            console.log(`📡 Sent volume to Arduino: ${volumePercent}%`);
+            return true;
+
+        } catch (error) {
+//            console.error('❌ Failed to send volume to Arduino:', error.message);
+            return false;
+        }
+    }
+
+    // Send a specific volume value to Arduino (for toggle on/off)
+    async sendSpecificVolumeToArduino(volumePercent) {
+        if (!this.characteristic) {
+            console.warn('⚠️ Cannot send volume: No characteristic connected');
+            return false;
+        }
+
+        try {
+            // Check if characteristic supports write
+            const canWrite = this.characteristic.properties.write ||
+                           this.characteristic.properties.writeWithoutResponse;
+
+            if (!canWrite) {
+                console.warn('⚠️ Characteristic does not support writing');
+                return false;
+            }
+
+            // Create data packet: "VOL:XX\n" format
+            const message = `VOL:${volumePercent}\n`;
+            const encoder = new TextEncoder();
+            const data = encoder.encode(message);
+
+            // Send to Arduino
+            if (this.characteristic.properties.writeWithoutResponse) {
+                await this.characteristic.writeValueWithoutResponse(data);
+            } else {
+                await this.characteristic.writeValue(data);
+            }
+
+//            console.log(`📡 Sent volume to Arduino: ${volumePercent}% (Toggle)`);
+            return true;
+
+        } catch (error) {
+//            console.error('❌ Failed to send volume to Arduino:', error.message);
+            return false;
+        }
+    }
+
+    // Toggle Arduino volume feedback on/off
+    // When turned off, set volume to 100 to ensure LED is always on
+    async toggleArduinoVolumeFeedback(isChecked) {
+        this.arduinoVolumeFeedbackEnabled = isChecked;
+
+        if (this.arduinoVolumeFeedbackEnabled) {
+            // Resume normal volume updates
+            console.log('✅ Arduino volume feedback enabled');
+            this.sendVolumeToArduino();
+        } else {
+            // Disabled: Send 100% volume
+            console.log('❌ Arduino volume feedback disabled');
+
+            // Send 0% to Arduino
+            await this.sendSpecificVolumeToArduino(100);
         }
     }
 
@@ -1039,8 +1184,7 @@ class ViolinPlayer {
                 if (this.audioElement.paused) {
                     this.audioElement.play().catch(e => console.log('Play error:', e));
                 }
-                this.currentVolume = this.maxVolume;
-                this.setAudioVolume(this.currentVolume);
+                this.setAudioVolume(this.maxVolume);
 
             } else {
                 // Below threshold: Gradient fade or pause
@@ -1060,12 +1204,11 @@ class ViolinPlayer {
                     if (!this.audioElement.paused) {
                         this.audioElement.pause();
                     }
-                    this.currentVolume = 0;
+                    this.setAudioVolume(0);
                 } else {
                     if (this.audioElement.paused) {
                         this.audioElement.play().catch(e => console.log('Play error:', e));
                     }
-                    this.currentVolume = targetVolume;
                     this.setAudioVolume(targetVolume);
                 }
             }
