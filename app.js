@@ -60,7 +60,12 @@ class ViolinPlayer {
         this.fadeStartTime = 0;
         this.fadeStartVolume = 0;
         this.fadeTargetVolume = 0;
-        this.fadeDuration = 1000; // 1000ms fade duration
+        this.fadeDuration = 500; // 500ms fade duration
+
+        // Volume smoothing (moving average filter for smoother transitions)
+        this.volumeHistory = [];
+        this.volumeHistorySize = 5; // Average last 5 volume values
+        this.smoothedVolume = 0;
 
         // Constants
         this.MAX_MOTION_SPEED = 250.0;
@@ -402,9 +407,15 @@ class ViolinPlayer {
             this.fadeStartVolume = currentVol;
             this.fadeTargetVolume = clampedTarget;
 
+            // Clear volume history when starting fade to avoid smoothing lag
+            this.volumeHistory = [];
+            this.smoothedVolume = currentVol;
+
             const fadeType = isFadingFromZero ? 'fade-in' : 'fade-out';
             console.log(`🎵 Starting ${fadeType} from ${(currentVol * 100).toFixed(0)}% to ${(clampedTarget * 100).toFixed(0)}%`);
         }
+
+        let volumeToSet;
 
         // Apply fade if active
         if (this.isFading) {
@@ -430,7 +441,7 @@ class ViolinPlayer {
             const volumeRange = this.fadeTargetVolume - this.fadeStartVolume;
             const fadeVolume = this.fadeStartVolume + (volumeRange * easedProgress);
 
-            this.setAudioVolume(fadeVolume);
+            volumeToSet = fadeVolume;
 
             // Check if we should stop early
             // Stop fade early if we've reached the target or if direction changed
@@ -445,7 +456,7 @@ class ViolinPlayer {
             if (progress >= 1.0 || reachedTarget || directionChanged || closeEnough) {
                 this.isFading = false;
                 // Set to current target, not original target
-                this.setAudioVolume(clampedTarget);
+                volumeToSet = clampedTarget;
                 if (progress < 1.0) {
                     console.log(`⏹️ Fade stopped early at ${(clampedTarget * 100).toFixed(0)}% (was targeting ${(this.fadeTargetVolume * 100).toFixed(0)}%)`);
                 } else {
@@ -454,8 +465,25 @@ class ViolinPlayer {
             }
         } else if (!shouldFade) {
             // No fade needed, set directly
-            this.setAudioVolume(clampedTarget);
+            volumeToSet = clampedTarget;
+        } else {
+            // Waiting to start fade, use current
+            volumeToSet = currentVol;
         }
+
+        // Apply volume smoothing (moving average filter) for all volume changes
+        // This creates smoother transitions by averaging recent volume values
+        this.volumeHistory.push(volumeToSet);
+        if (this.volumeHistory.length > this.volumeHistorySize) {
+            this.volumeHistory.shift();
+        }
+
+        // Calculate smoothed volume (average of history)
+        const sum = this.volumeHistory.reduce((a, b) => a + b, 0);
+        this.smoothedVolume = sum / this.volumeHistory.length;
+
+        // Apply the smoothed volume
+        this.setAudioVolume(this.smoothedVolume);
     }
 
     // Set gain value with smooth exponential ramping to prevent clicks/pops
