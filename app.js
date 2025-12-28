@@ -94,6 +94,46 @@ class ViolinPlayer {
         setTimeout(() => this.attemptAutoReconnect(), 1000);
     }
 
+    // ===== BUTTON STATE UTILITY FUNCTIONS =====
+
+    /**
+     * Update IMU Playback button state
+     * @param {boolean} isPlaying - Whether IMU playback is active
+     */
+    updateImuPlaybackButton(isPlaying) {
+        const btn = document.getElementById('imuPlaybackBtn');
+        if (!btn) return;
+
+        if (isPlaying) {
+            btn.textContent = 'Pause IMU Playback';
+            btn.classList.remove('inactive');
+            btn.classList.add('active');
+        } else {
+            btn.textContent = 'Play IMU Playback';
+            btn.classList.remove('active');
+            btn.classList.add('inactive');
+        }
+    }
+
+    /**
+     * Update Test Playback button state
+     * @param {boolean} isPlaying - Whether test playback is active
+     */
+    updateTestPlaybackButton(isPlaying) {
+        const btn = document.getElementById('testPlaybackBtn');
+        if (!btn) return;
+
+        if (isPlaying) {
+            btn.textContent = 'Stop Test Playback';
+            btn.classList.add('active');
+        } else {
+            btn.textContent = 'Test Playback (Preview)';
+            btn.classList.remove('active');
+        }
+    }
+
+    // ===== AUDIO SETUP =====
+
     setupAudio() {
         console.log('=== Audio Setup: Browser Compatibility Check ===');
 
@@ -117,12 +157,32 @@ class ViolinPlayer {
         }
 
         this.audioElement = new Audio();
-        this.audioElement.loop = true;
+        this.audioElement.loop = false; // Default: loop disabled
 
         // Enable background audio playback for iOS
         // This prevents audio from stopping when browser is minimized or screen is off
         this.audioElement.setAttribute('playsinline', '');
         this.audioElement.setAttribute('webkit-playsinline', '');
+
+        // Handle song end when loop is disabled
+        this.audioElement.addEventListener('ended', () => {
+            // Only act if loop is disabled
+            if (!this.audioElement.loop) {
+                // Turn off IMU playback if active
+                if (this.isImuPlaying) {
+                    console.log('🔚 Song ended with loop disabled - turning off IMU playback');
+                    this.isImuPlaying = false;
+                    this.updateImuPlaybackButton(false);
+                }
+
+                // Turn off test playback if active
+                if (this.isTestPlaying) {
+                    console.log('🔚 Song ended with loop disabled - turning off test playback');
+                    this.isTestPlaying = false;
+                    this.updateTestPlaybackButton(false);
+                }
+            }
+        });
 
         // Set audio element to not pause on background (iOS Safari)
         if ('mediaSession' in navigator) {
@@ -390,11 +450,7 @@ class ViolinPlayer {
             title: 'Hysilens Violin Player',
             artist: 'IMU Motion Control',
             album: 'Violin Performance',
-            artwork: [
-                { src: 'icon-96.png', sizes: '96x96', type: 'image/png' },
-                { src: 'icon-192.png', sizes: '192x192', type: 'image/png' },
-                { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }
-            ]
+            artwork: []
         });
 
         // Set up action handlers
@@ -895,6 +951,12 @@ class ViolinPlayer {
             document.getElementById('motionThresholdValue').textContent = e.target.value;
         });
 
+        // Loop Toggle
+        document.getElementById('loopToggle').addEventListener('change', (e) => {
+            this.audioElement.loop = e.target.checked;
+            console.log(`🔁 Loop playback ${e.target.checked ? 'enabled' : 'disabled'}`);
+        });
+
         // Arduino Volume Feedback Toggle
         document.getElementById('arduinoVolumeFeedbackToggle').addEventListener('change', (e) => this.toggleArduinoVolumeFeedback(e.target.checked));
 
@@ -1025,8 +1087,12 @@ class ViolinPlayer {
         document.getElementById('disconnectBtn').disabled = true;
         document.getElementById('imuSection').style.display = 'none';
 
-        if (this.audioElement) {
+        // Only pause audio if test playback is NOT active
+        if (this.audioElement && !this.isTestPlaying) {
             this.forcePause();
+            console.log('Audio paused (Bluetooth disconnected, test playback not active)');
+        } else if (this.isTestPlaying) {
+            console.log('Test playback active - keeping audio playing');
         }
     }
 
@@ -1130,9 +1196,7 @@ class ViolinPlayer {
             // Stop test playback if it's running
             if (this.isTestPlaying) {
                 this.isTestPlaying = false;
-                const testBtn = document.getElementById('testPlaybackBtn');
-                testBtn.textContent = 'Test Playback (Preview)';
-                testBtn.classList.remove('active');
+                this.updateTestPlaybackButton(false);
 
                 // Stop test playback audio
                 if (this.playbackMode === 'MP3') {
@@ -1147,10 +1211,7 @@ class ViolinPlayer {
             // Automatically start IMU playback after successful connection
             console.log('🎵 Auto-starting IMU playback after Bluetooth connection...');
             this.isImuPlaying = true;
-            const imuBtn = document.getElementById('imuPlaybackBtn');
-            imuBtn.textContent = 'Pause IMU Playback';
-            imuBtn.classList.remove('inactive');
-            imuBtn.classList.add('active');
+            this.updateImuPlaybackButton(true);
 
             // Start audio if track is loaded
             if (this.audioElement.src) {
@@ -1379,8 +1440,12 @@ class ViolinPlayer {
         document.getElementById('disconnectBtn').disabled = true;
         document.getElementById('imuSection').style.display = 'none';
 
-        if (this.audioElement) {
+        // Only pause audio if test playback is NOT active
+        if (this.audioElement && !this.isTestPlaying) {
             this.forcePause();
+            console.log('Audio paused (Bluetooth disconnected, test playback not active)');
+        } else if (this.isTestPlaying) {
+            console.log('Test playback active - keeping audio playing');
         }
     }
 
@@ -1899,6 +1964,13 @@ class ViolinPlayer {
                 this.audioElement.play().catch(e => console.log('Play error:', e));
             }
 
+            // Auto-play if test playback is active
+            if (this.isTestPlaying && this.playbackMode === 'MP3') {
+                console.log('🔊 Resuming test playback with new track');
+                this.setAudioVolume(this.maxVolume);
+                this.audioElement.play().catch(e => console.log('Play error:', e));
+            }
+
             console.log(`✅ MP3 file loaded: ${name}`);
         } catch (error) {
             console.error('Error in loadTrack:', error);
@@ -1915,18 +1987,13 @@ class ViolinPlayer {
 
     async toggleImuPlayback() {
         this.isImuPlaying = !this.isImuPlaying;
-        const btn = document.getElementById('imuPlaybackBtn');
+        this.updateImuPlaybackButton(this.isImuPlaying);
 
         if (this.isImuPlaying) {
-            btn.textContent = 'Pause IMU Playback';
-            btn.classList.remove('inactive');
-
             // Stop test playback if it's currently active
             if (this.isTestPlaying) {
                 this.isTestPlaying = false;
-                const testBtn = document.getElementById('testPlaybackBtn');
-                testBtn.textContent = 'Test Playback (Preview)';
-                testBtn.classList.remove('active');
+                this.updateTestPlaybackButton(false);
 
                 // Stop test playback audio
                 if (this.playbackMode === 'MP3') {
@@ -1955,8 +2022,6 @@ class ViolinPlayer {
                 this.audioElement.play().catch(e => console.log('Play error:', e));
             }
         } else {
-            btn.textContent = 'Play IMU Playback';
-            btn.classList.add('inactive');
             if (this.playbackMode === 'MP3') {
                 this.forcePause();
             } else {
@@ -1967,19 +2032,14 @@ class ViolinPlayer {
 
     async toggleTestPlayback() {
         this.isTestPlaying = !this.isTestPlaying;
-        const btn = document.getElementById('testPlaybackBtn');
+        this.updateTestPlaybackButton(this.isTestPlaying);
 
         if (this.isTestPlaying) {
-            btn.textContent = 'Stop Test Playback';
-            btn.classList.add('active');
-
             // Pause IMU playback if it's currently playing
             if (this.isImuPlaying) {
                 // Directly set the state and update UI
                 this.isImuPlaying = false;
-                const imuBtn = document.getElementById('imuPlaybackBtn');
-                imuBtn.textContent = 'Play IMU Playback';
-                imuBtn.classList.add('inactive');
+                this.updateImuPlaybackButton(false);
 
                 // Stop any IMU-controlled playback
                 if (this.playbackMode === 'MP3') {
@@ -2005,9 +2065,6 @@ class ViolinPlayer {
                 this.startTestMidiPlayback();
             }
         } else {
-            btn.textContent = 'Test Playback (Preview)';
-            btn.classList.remove('active');
-
             // Stop test playback
             if (this.playbackMode === 'MP3') {
                 this.forcePause();
@@ -2046,17 +2103,13 @@ class ViolinPlayer {
             // Stop any current playback
             if (this.isTestPlaying) {
                 this.isTestPlaying = false;
-                const testBtn = document.getElementById('testPlaybackBtn');
-                testBtn.textContent = 'Test Playback (Preview)';
-                testBtn.classList.remove('active');
+                this.updateTestPlaybackButton(false);
             }
 
             // Stop IMU playback if active
             if (this.isImuPlaying) {
                 this.isImuPlaying = false;
-                const imuBtn = document.getElementById('imuPlaybackBtn');
-                imuBtn.textContent = 'Play IMU Playback';
-                imuBtn.classList.add('inactive');
+                this.updateImuPlaybackButton(false);
             }
 
             // Pause audio and reset position
@@ -2100,10 +2153,7 @@ class ViolinPlayer {
 
             // Start IMU playback
             this.isImuPlaying = true;
-            const imuBtn = document.getElementById('imuPlaybackBtn');
-            imuBtn.textContent = 'Pause IMU Playback';
-            imuBtn.classList.remove('inactive');
-            imuBtn.classList.add('active');
+            this.updateImuPlaybackButton(true);
 
             // Start audio playback if track is loaded
             if (this.audioElement.src && this.playbackMode === 'MP3') {
