@@ -1127,6 +1127,23 @@ class ViolinPlayer {
             // Send initial volume level to Arduino
             this.sendVolumeToArduino();
 
+            // Stop test playback if it's running
+            if (this.isTestPlaying) {
+                this.isTestPlaying = false;
+                const testBtn = document.getElementById('testPlaybackBtn');
+                testBtn.textContent = 'Test Playback (Preview)';
+                testBtn.classList.remove('active');
+
+                // Stop test playback audio
+                if (this.playbackMode === 'MP3') {
+                    this.forcePause();
+                } else {
+                    this.stopMidiPlayback();
+                }
+
+                console.log('Test playback stopped (IMU playback auto-started)');
+            }
+
             // Automatically start IMU playback after successful connection
             console.log('🎵 Auto-starting IMU playback after Bluetooth connection...');
             this.isImuPlaying = true;
