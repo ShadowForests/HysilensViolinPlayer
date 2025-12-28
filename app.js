@@ -55,6 +55,13 @@ class ViolinPlayer {
         this.motionThreshold = 0.15; // 15%
         this.currentVolume = 0;
 
+        // Fade tracking (smooth transitions between volume levels)
+        this.isFading = false;
+        this.fadeStartTime = 0;
+        this.fadeStartVolume = 0;
+        this.fadeTargetVolume = 0;
+        this.fadeDuration = 1000; // 1000ms fade duration
+
         // Constants
         this.MAX_MOTION_SPEED = 250.0;
 
@@ -375,6 +382,79 @@ class ViolinPlayer {
             console.error('❌ Failed to set audio volume:', e.message);
             console.error('Volume requested:', clampedVolume);
             return false;
+        }
+    }
+
+    // Smoothly transition to target volume with fade (for 0 to volume or volume to 0 transitions)
+    smoothSetAudioVolume(targetVolume) {
+        const clampedTarget = Math.max(0, Math.min(1, targetVolume));
+        const currentVol = this.currentVolume || 0;
+
+        // Check if we need to start a new fade
+        const isFadingFromZero = currentVol < 0.01 && clampedTarget > 0.01;
+        const isFadingToZero = currentVol > 0.01 && clampedTarget < 0.01;
+        const shouldFade = isFadingFromZero || isFadingToZero;
+
+        if (shouldFade && !this.isFading) {
+            // Start new fade
+            this.isFading = true;
+            this.fadeStartTime = Date.now();
+            this.fadeStartVolume = currentVol;
+            this.fadeTargetVolume = clampedTarget;
+
+            const fadeType = isFadingFromZero ? 'fade-in' : 'fade-out';
+            console.log(`🎵 Starting ${fadeType} from ${(currentVol * 100).toFixed(0)}% to ${(clampedTarget * 100).toFixed(0)}%`);
+        }
+
+        // Apply fade if active
+        if (this.isFading) {
+            // Dynamically update target if it changed during fade
+            const targetChanged = Math.abs(this.fadeTargetVolume - clampedTarget) > 0.02;
+            if (targetChanged) {
+                // Update target smoothly without restarting fade
+                this.fadeTargetVolume = clampedTarget;
+            }
+
+            const elapsed = Date.now() - this.fadeStartTime;
+            const progress = Math.min(elapsed / this.fadeDuration, 1.0);
+
+            // Ease-in-out curve for smooth transition
+            let easedProgress;
+            if (progress < 0.5) {
+                easedProgress = 2 * progress * progress;
+            } else {
+                easedProgress = 1 - 2 * Math.pow(1 - progress, 2);
+            }
+
+            // Calculate intermediate volume
+            const volumeRange = this.fadeTargetVolume - this.fadeStartVolume;
+            const fadeVolume = this.fadeStartVolume + (volumeRange * easedProgress);
+
+            this.setAudioVolume(fadeVolume);
+
+            // Check if we should stop early
+            // Stop fade early if we've reached the target or if direction changed
+            const reachedTarget = Math.abs(currentVol - clampedTarget) < 0.01;
+            const directionChanged =
+                (this.fadeStartVolume < clampedTarget && currentVol > clampedTarget) ||
+                (this.fadeStartVolume > clampedTarget && currentVol < clampedTarget);
+
+            // Also stop if we're close enough to target and target stopped changing
+            const closeEnough = Math.abs(currentVol - clampedTarget) < 0.05 && !targetChanged;
+
+            if (progress >= 1.0 || reachedTarget || directionChanged || closeEnough) {
+                this.isFading = false;
+                // Set to current target, not original target
+                this.setAudioVolume(clampedTarget);
+                if (progress < 1.0) {
+                    console.log(`⏹️ Fade stopped early at ${(clampedTarget * 100).toFixed(0)}% (was targeting ${(this.fadeTargetVolume * 100).toFixed(0)}%)`);
+                } else {
+                    console.log(`✅ Fade complete at ${(clampedTarget * 100).toFixed(0)}%`);
+                }
+            }
+        } else if (!shouldFade) {
+            // No fade needed, set directly
+            this.setAudioVolume(clampedTarget);
         }
     }
 
@@ -1210,11 +1290,11 @@ class ViolinPlayer {
             const threshold = this.motionThreshold;
 
             if (normalizedSpeed >= threshold) {
-                // Above threshold: Full volume
+                // Above threshold: Full volume (with gradual fade-in if coming from 0)
                 if (this.audioElement.paused) {
                     this.audioElement.play().catch(e => console.log('Play error:', e));
                 }
-                this.setAudioVolume(this.maxVolume);
+                this.smoothSetAudioVolume(this.maxVolume);
 
             } else {
                 // Below threshold: Gradient fade or pause
@@ -1234,12 +1314,12 @@ class ViolinPlayer {
                     if (!this.audioElement.paused) {
                         this.forcePause();
                     }
-                    this.setAudioVolume(0);
+                    this.smoothSetAudioVolume(0); // Gradual fade-out to 0
                 } else {
                     if (this.audioElement.paused) {
                         this.audioElement.play().catch(e => console.log('Play error:', e));
                     }
-                    this.setAudioVolume(targetVolume);
+                    this.smoothSetAudioVolume(targetVolume); // Gradual fade-in if coming from 0
                 }
             }
         }
