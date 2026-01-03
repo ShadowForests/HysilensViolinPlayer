@@ -45,6 +45,26 @@ php -S localhost:8000
 
 ⚠️ **Important**: Modern browsers require HTTPS for Web Bluetooth API access (except on localhost). If deploying to production, ensure you're using HTTPS.
 
+### Managing Audio Files
+
+The app includes built-in MP3 and MIDI files stored in `assets/mp3/` and `assets/midi/`. To add your own files:
+
+1. **Add MP3 files**: Place your .mp3 files in `assets/mp3/`
+2. **Add MIDI files**: Place your .mid or .midi files in `assets/midi/`
+3. **Update manifest**: Run the update script:
+
+```bash
+node update-manifest.js
+```
+
+The script will:
+- Scan both directories for audio files
+- Automatically generate friendly names from filenames
+- Update `assets/manifest.js` with all discovered files
+- Display a summary of found files
+
+**Manual Alternative**: You can also manually edit `assets/manifest.js` following the existing format.
+
 ## 📱 Usage
 
 ### Connecting to Arduino
