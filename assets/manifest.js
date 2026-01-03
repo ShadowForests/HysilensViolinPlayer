@@ -13,7 +13,11 @@ window.ASSETS_MANIFEST = {
         // MP3 files currently in assets/mp3/ folder
         { name: "Hysilens' Unfinished Melody - for String Orchestra", file: "Hysilens' Unfinished Melody - for String Orchestra [-rjmcAv3GAk].mp3" },
         { name: "Honkai Star Rail - Space Walk (Kirara Magic Remix)", file: "「Honkai_ Star Rail」Space Walk (Kirara Magic Remix).mp3" },
-        { name: "Hope Is the Thing With Feathers (Instrumental)", file: "06. Hope Is the Thing With Feathers (Instrumental).mp3" }
+        { name: "Hope Is the Thing With Feathers (Instrumental)", file: "06. Hope Is the Thing With Feathers (Instrumental).mp3" },
+        { name: "Project_Violin_Bad_Apple_violin_cover", file: "Project_Violin_Bad_Apple_violin_cover.mp3" },
+        { name: "【東方】Bad Apple!! ＰＶ【影絵】", file: "【東方】Bad Apple!! ＰＶ【影絵】_FtutLA63Cp8.mp3" },
+        { name: "Never_Gonna_Give_You_Up_-_Rick_Astley_-_Stringspace_String_Quartet", file: "Never_Gonna_Give_You_Up_-_Rick_Astley_-_Stringspace_String_Quartet.mp3" },
+        { name: "Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)", file: "Rick Astley - Never Gonna Give You Up (Official Video) (4K Remaster)_dQw4w9WgXcQ.mp3" }
     ],
     midi: [
         // MIDI files currently in assets/midi/ folder

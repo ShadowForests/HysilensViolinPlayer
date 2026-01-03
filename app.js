@@ -60,7 +60,8 @@ class ViolinPlayer {
         this.fadeStartTime = 0;
         this.fadeStartVolume = 0;
         this.fadeTargetVolume = 0;
-        this.fadeDuration = 500; // 500ms fade duration
+        this.fadeInDuration = 500; // fade-in duration
+        this.fadeOutDuration = 30; // fade-out duration (faster)
 
         // Volume smoothing (moving average filter for smoother transitions)
         this.volumeHistory = [];
@@ -603,7 +604,12 @@ class ViolinPlayer {
         // Check if we need to start a new fade
         const isFadingFromZero = currentVol < 0.01 && clampedTarget > 0.01;
         const isFadingToZero = currentVol > 0.01 && clampedTarget < 0.01;
-        const shouldFade = isFadingFromZero || isFadingToZero;
+        
+        // Check if fade is enabled (duration > 0)
+        const fadeInEnabled = this.fadeInDuration > 0;
+        const fadeOutEnabled = this.fadeOutDuration > 0;
+        
+        const shouldFade = (isFadingFromZero && fadeInEnabled) || (isFadingToZero && fadeOutEnabled);
 
         if (shouldFade && !this.isFading) {
             // Start new fade
@@ -611,6 +617,7 @@ class ViolinPlayer {
             this.fadeStartTime = Date.now();
             this.fadeStartVolume = currentVol;
             this.fadeTargetVolume = clampedTarget;
+            this.currentFadeDirection = isFadingFromZero ? 'in' : 'out';
 
             // Clear volume history when starting fade to avoid smoothing lag
             this.volumeHistory = [];
@@ -632,14 +639,21 @@ class ViolinPlayer {
             }
 
             const elapsed = Date.now() - this.fadeStartTime;
-            const progress = Math.min(elapsed / this.fadeDuration, 1.0);
+            const fadeDuration = this.currentFadeDirection === 'in' ? this.fadeInDuration : this.fadeOutDuration;
+            const progress = fadeDuration > 0 ? Math.min(elapsed / fadeDuration, 1.0) : 1.0;
 
-            // Ease-in-out curve for smooth transition
+            // Different easing curves for fade-in vs fade-out
             let easedProgress;
-            if (progress < 0.5) {
-                easedProgress = 2 * progress * progress;
+            if (this.currentFadeDirection === 'out') {
+                // Faster fade-out with exponential curve (steeper drop)
+                easedProgress = 1 - Math.pow(1 - progress, 20);
             } else {
-                easedProgress = 1 - 2 * Math.pow(1 - progress, 2);
+                // Smooth ease-in-out for fade-in
+                if (progress < 0.5) {
+                    easedProgress = 2 * progress * progress;
+                } else {
+                    easedProgress = 1 - 2 * Math.pow(1 - progress, 2);
+                }
             }
 
             // Calculate intermediate volume
@@ -968,6 +982,26 @@ class ViolinPlayer {
 
         document.getElementById('arduinoMaxVolumeSlider').addEventListener('change', (e) => {
             console.log(`🔊 Arduino volume scale set to: ${e.target.value}% (scale: ${this.arduinoMaxVolumeScale.toFixed(2)})`);
+        });
+
+        // Fade In Duration
+        document.getElementById('fadeInDurationSlider').addEventListener('input', (e) => {
+            this.fadeInDuration = parseInt(e.target.value);
+            document.getElementById('fadeInDurationValue').textContent = e.target.value;
+        });
+
+        document.getElementById('fadeInDurationSlider').addEventListener('change', (e) => {
+            console.log(`🎵 Fade-in duration set to: ${e.target.value}ms`);
+        });
+
+        // Fade Out Duration
+        document.getElementById('fadeOutDurationSlider').addEventListener('input', (e) => {
+            this.fadeOutDuration = parseInt(e.target.value);
+            document.getElementById('fadeOutDurationValue').textContent = e.target.value;
+        });
+
+        document.getElementById('fadeOutDurationSlider').addEventListener('change', (e) => {
+            console.log(`🎵 Fade-out duration set to: ${e.target.value}ms`);
         });
 
         // Service modal

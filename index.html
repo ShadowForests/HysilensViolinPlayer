@@ -229,6 +229,26 @@
 
                 <div class="divider"></div>
 
+                <!-- Fade In Duration -->
+                <div class="control-group">
+                    <div class="slider-control">
+                        <label for="fadeInDurationSlider">Fade-In Duration: <span id="fadeInDurationValue">500</span>ms</label>
+                        <p class="slider-description">Time to fade volume from 0 to target (0 = instant)</p>
+                        <input type="range" id="fadeInDurationSlider" class="slider" min="0" max="1000" step="10" value="500">
+                    </div>
+                </div>
+
+                <!-- Fade Out Duration -->
+                <div class="control-group">
+                    <div class="slider-control">
+                        <label for="fadeOutDurationSlider">Fade-Out Duration: <span id="fadeOutDurationValue">0</span>ms</label>
+                        <p class="slider-description">Time to fade volume to 0 (0 = instant)</p>
+                        <input type="range" id="fadeOutDurationSlider" class="slider" min="0" max="1000" step="10" value="30">
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+
                 <!-- Current Volume Display -->
                 <div class="control-group">
                     <div class="volume-display">
