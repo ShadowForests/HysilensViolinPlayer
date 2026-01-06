@@ -93,17 +93,17 @@ class ViolinPlayer {
         this.init();
     }
 
-    init() {
+    async init() {
         this.setupConsoleInterceptor();
         this.setupWindowErrorHandlers();
         this.setupAudio();
         this.setupEventListeners();
         this.updateUI();
         
-        // Initialize audio cache and preload files
-        this.initAudioCache();
+        // Initialize audio cache first, then load default tracks after initialization
+        await this.initAudioCache();
 
-        // Load default tracks
+        // Load default tracks after cache is ready
         this.loadDefaultTracks();
 
         // Attempt auto-reconnect after short delay
@@ -1060,8 +1060,8 @@ class ViolinPlayer {
             this.cacheInitialized = true;
             console.log('✅ Audio cache initialized');
             
-            // Preload all audio files in background
-            this.preloadAudioFiles();
+            // Preload all audio files
+            await this.preloadAudioFiles();
         } catch (error) {
             console.error('Failed to initialize audio cache:', error);
         }
@@ -1100,8 +1100,7 @@ class ViolinPlayer {
                 if (cached) {
                     skippedCount++;
                 } else {
-                    // Cache in background without blocking
-                    cache.add(url).then(() => {
+                    await cache.add(url).then(() => {
                         cachedCount++;
                         console.log(`📥 Cached: ${url.split('/').pop()}`);
                     }).catch(err => {
@@ -1110,7 +1109,7 @@ class ViolinPlayer {
                 }
             }
             
-            console.log(`📦 Preload complete: ${skippedCount} already cached, ${filesToCache.length - skippedCount} queued for caching`);
+            console.log(`📦 Preload complete: ${skippedCount} already cached, ${filesToCache.length - skippedCount} cached`);
         } catch (error) {
             console.error('Error during audio preload:', error);
         }
