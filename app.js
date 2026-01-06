@@ -18,6 +18,7 @@ class ViolinPlayer {
         // Idle mode (Arduino LED animation when not playing)
         this.idleMode = false; // Whether idle mode is active
         this.idleTransitionTimeout = null; // Timeout before entering idle mode
+        this.isTransitioningToIdleMode = false; // Whether currently transitioning to idle mode
 
         // Audio
         this.audioContext = null;
@@ -1593,8 +1594,6 @@ class ViolinPlayer {
 
     // Start idle mode with transition
     async startIdleMode() {
-        if (this.idleMode) return; // Already in idle mode
-        
         this.idleMode = true;
         
         console.log('🌙 Entering idle mode...');
@@ -1611,9 +1610,8 @@ class ViolinPlayer {
     
     // Stop idle mode
     stopIdleMode() {
-        if (!this.idleMode) return; // Already stopped
-        
         this.idleMode = false;
+        this.isTransitioningToIdleMode = false;
         
         console.log('☀️ Exiting idle mode');
         
@@ -1641,12 +1639,19 @@ class ViolinPlayer {
     
     // Gradually fade Arduino volume to 0 over specified duration
     async fadeArduinoVolumeToZero(durationMs = 1000) {
+        this.isTransitioningToIdleMode = true;
         const startVolume = Math.round(this.currentVolume * this.arduinoMaxVolumeScale * 100);
         const startTime = Date.now();
         
         console.log(`📉 Fading Arduino volume from ${startVolume}% to 0% over ${durationMs}ms...`);
         
         const fade = async () => {
+            if (!this.isTransitioningToIdleMode) {
+                // Stop fading if not in idle mode
+                console.log('❌ Fade aborted: Not in idle mode');
+                return;
+            }
+
             const elapsed = Date.now() - startTime;
             const progress = Math.min(elapsed / durationMs, 1.0);
             
@@ -1655,7 +1660,7 @@ class ViolinPlayer {
             const currentVolume = Math.round(startVolume * (1 - easedProgress));
             
             await this.sendSpecificVolumeToArduino(currentVolume);
-            
+
             if (progress < 1.0) {
                 // Continue fading
                 setTimeout(fade, 30);
@@ -2434,6 +2439,9 @@ class ViolinPlayer {
 
             // Start test playback
             this.sendSpecificVolumeToArduino(100);
+            setTimeout(() => {
+                this.sendSpecificVolumeToArduino(100);
+            }, 500);
             if (this.playbackMode === 'MP3') {
                 this.setAudioVolume(this.maxVolume);
                 this.audioElement.play().catch(e => console.log('Play error:', e));
