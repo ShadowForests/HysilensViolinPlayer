@@ -30,7 +30,6 @@ class ViolinPlayer {
         this.usingWebAudioVolume = false; // Flag for Web Audio volume control
         this.needsWebAudioVolume = false; // Flag to setup Web Audio when audio loads
         this.currentTrack = null;
-        this.currentAudioUrl = null; // Store current audio URL for re-loading after forcePause
         this.isTestPlaying = false;
         this.isImuPlaying = false; // Default to false - starts paused until Bluetooth connected
         this.onMetadataLoaded = null; // Track metadata listener to prevent duplicates
@@ -100,12 +99,12 @@ class ViolinPlayer {
         this.setupAudio();
         this.setupEventListeners();
         this.updateUI();
-
-        // Load default tracks
-        this.loadDefaultTracks();
         
         // Initialize audio cache and preload files
         this.initAudioCache();
+
+        // Load default tracks
+        this.loadDefaultTracks();
 
         // Attempt auto-reconnect after short delay
         setTimeout(() => this.attemptAutoReconnect(), 1000);
@@ -1569,11 +1568,10 @@ class ViolinPlayer {
                 const progress = elapsed / 3000;
                 targetVolume = Math.round(progress * 100);
             } else {
-                // After 3 seconds: wave from 100 to 75 to 100 every 4 seconds
+                // After 3 seconds: wave from 100 to 20 to 100 every 4 seconds
                 const waveTime = (elapsed - 3000) % 4000;
                 const waveProgress = waveTime / 4000;
                 
-                // Sine wave from 100 to 20 to 100
                 const waveValue = 60 + 40 * Math.cos(waveProgress * Math.PI * 2);
                 targetVolume = Math.round(waveValue);
             }
@@ -2263,7 +2261,6 @@ class ViolinPlayer {
             // Set new source
             this.audioElement.src = audioUrl;
             this.currentTrack = name;
-            this.currentAudioUrl = audioUrl; // Store for re-loading after forcePause
             document.getElementById('trackName').textContent = name;
 
             // Remove old listener to prevent memory leak
@@ -2313,14 +2310,7 @@ class ViolinPlayer {
     async forcePause() {
         this.audioElement.pause();
         const lastTime = this.audioElement.currentTime;
-        const savedUrl = this.currentAudioUrl; // Save URL before load() clears it
         this.audioElement.load(); // Reset the audio element
-        
-        // Restore the source URL after load()
-        if (savedUrl) {
-            this.audioElement.src = savedUrl;
-        }
-        
         this.audioElement.currentTime = lastTime;
     }
 
