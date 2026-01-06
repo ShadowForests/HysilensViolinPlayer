@@ -85,6 +85,10 @@ class ViolinPlayer {
         // Console log history
         this.consoleHistory = [];
         this.maxConsoleLines = 100;
+        
+        // Audio cache
+        this.AUDIO_CACHE_NAME = 'hysilens-audio-cache-v1';
+        this.cacheInitialized = false;
 
         this.init();
     }
@@ -98,6 +102,9 @@ class ViolinPlayer {
 
         // Load default tracks
         this.loadDefaultTracks();
+        
+        // Initialize audio cache and preload files
+        this.initAudioCache();
 
         // Attempt auto-reconnect after short delay
         setTimeout(() => this.attemptAutoReconnect(), 1000);
@@ -1038,6 +1045,119 @@ class ViolinPlayer {
 
         // Update playback position
         setInterval(() => this.updatePlaybackPosition(), 100);
+    }
+
+    // ===== AUDIO CACHE =====
+    
+    async initAudioCache() {
+        if (!('caches' in window)) {
+            console.warn('Cache API not supported in this browser');
+            return;
+        }
+        
+        try {
+            const cache = await caches.open(this.AUDIO_CACHE_NAME);
+            this.cacheInitialized = true;
+            console.log('✅ Audio cache initialized');
+            
+            // Preload all audio files in background
+            this.preloadAudioFiles();
+        } catch (error) {
+            console.error('Failed to initialize audio cache:', error);
+        }
+    }
+    
+    async preloadAudioFiles() {
+        if (!this.cacheInitialized || !window.ASSETS_MANIFEST) return;
+        
+        console.log('📦 Starting background audio preload...');
+        
+        const filesToCache = [];
+        
+        // Collect all MP3 files
+        if (window.ASSETS_MANIFEST.mp3) {
+            window.ASSETS_MANIFEST.mp3.forEach(item => {
+                filesToCache.push(`assets/mp3/${item.file}`);
+            });
+        }
+        
+        // Collect all MIDI files
+        if (window.ASSETS_MANIFEST.midi) {
+            window.ASSETS_MANIFEST.midi.forEach(item => {
+                filesToCache.push(`assets/midi/${item.file}`);
+            });
+        }
+        
+        let cachedCount = 0;
+        let skippedCount = 0;
+        
+        try {
+            const cache = await caches.open(this.AUDIO_CACHE_NAME);
+            
+            // Check which files are already cached
+            for (const url of filesToCache) {
+                const cached = await cache.match(url);
+                if (cached) {
+                    skippedCount++;
+                } else {
+                    // Cache in background without blocking
+                    cache.add(url).then(() => {
+                        cachedCount++;
+                        console.log(`📥 Cached: ${url.split('/').pop()}`);
+                    }).catch(err => {
+                        console.warn(`Failed to cache ${url}:`, err.message);
+                    });
+                }
+            }
+            
+            console.log(`📦 Preload complete: ${skippedCount} already cached, ${filesToCache.length - skippedCount} queued for caching`);
+        } catch (error) {
+            console.error('Error during audio preload:', error);
+        }
+    }
+    
+    async getCachedAudio(url) {
+        if (!this.cacheInitialized) return null;
+        
+        try {
+            const cache = await caches.open(this.AUDIO_CACHE_NAME);
+            const response = await cache.match(url);
+            
+            if (response) {
+                console.log(`💾 Loaded from cache: ${url.split('/').pop()}`);
+                return response;
+            }
+        } catch (error) {
+            console.warn('Cache lookup failed:', error);
+        }
+        
+        return null;
+    }
+    
+    async cacheAudio(url) {
+        if (!this.cacheInitialized) return;
+        
+        try {
+            const cache = await caches.open(this.AUDIO_CACHE_NAME);
+            await cache.add(url);
+            console.log(`💾 Cached: ${url.split('/').pop()}`);
+        } catch (error) {
+            console.warn('Failed to cache audio:', error);
+        }
+    }
+    
+    async clearAudioCache() {
+        try {
+            const deleted = await caches.delete(this.AUDIO_CACHE_NAME);
+            if (deleted) {
+                console.log('🗑️ Audio cache cleared');
+                this.cacheInitialized = false;
+            }
+            return deleted;
+        } catch (error) {
+            console.error('Failed to clear cache:', error);
+            return false;
+        }
     }
 
     // ===== BLUETOOTH CONNECTION =====
@@ -2114,7 +2234,7 @@ class ViolinPlayer {
         }
     }
 
-    loadTrack(url, name) {
+    async loadTrack(url, name) {
         try {
             // Stop current playback
             this.forcePause();
@@ -2125,8 +2245,22 @@ class ViolinPlayer {
                 URL.revokeObjectURL(this.audioElement.src);
             }
 
+            // Try to load from cache first
+            let audioUrl = url;
+            const cachedResponse = await this.getCachedAudio(url);
+            
+            if (cachedResponse) {
+                // Create blob URL from cached response
+                const blob = await cachedResponse.blob();
+                audioUrl = URL.createObjectURL(blob);
+            } else {
+                // Not in cache, will fetch from network and cache it
+                console.log(`🌐 Loading from network: ${url.split('/').pop()}`);
+                this.cacheAudio(url); // Cache in background
+            }
+
             // Set new source
-            this.audioElement.src = url;
+            this.audioElement.src = audioUrl;
             this.currentTrack = name;
             document.getElementById('trackName').textContent = name;
 
