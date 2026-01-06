@@ -17,9 +17,6 @@ class ViolinPlayer {
         // Idle mode (Arduino LED animation when not playing)
         this.idleMode = false; // Whether idle mode is active
         this.idleTransitionTimeout = null; // Timeout before entering idle mode
-        this.idleAnimationInterval = null; // Interval for idle wave animation
-        this.idleStartTime = 0; // When idle mode started
-        this.lastIdleVolume = 0; // Last volume sent in idle mode
 
         // Audio
         this.audioContext = null;
@@ -1410,7 +1407,9 @@ class ViolinPlayer {
             } else {
                 // Start idle mode animation by default after connection
                 console.log('🌙 Starting idle mode animation after Bluetooth connection...');
-                this.startIdleMode();
+                setTimeout(() => {
+                    this.startIdleMode();
+                }, 500);
             }
 
         } catch (error) {
@@ -1508,14 +1507,50 @@ class ViolinPlayer {
             return false;
         }
     }
+    
+    // Send IDLE command to Arduino
+    async sendIdleCommandToArduino() {
+        if (!this.characteristic) {
+            console.warn('⚠️ Cannot send IDLE: No characteristic connected');
+            return false;
+        }
+
+        try {
+            // Check if characteristic supports write
+            const canWrite = this.characteristic.properties.write ||
+                           this.characteristic.properties.writeWithoutResponse;
+
+            if (!canWrite) {
+                console.warn('⚠️ Characteristic does not support writing');
+                return false;
+            }
+
+            // Create data packet: "IDLE\n" format
+            const message = 'IDLE\n';
+            const encoder = new TextEncoder();
+            const data = encoder.encode(message);
+
+            // Send to Arduino
+            if (this.characteristic.properties.writeWithoutResponse) {
+                await this.characteristic.writeValueWithoutResponse(data);
+            } else {
+                await this.characteristic.writeValue(data);
+            }
+
+            console.log('📡 Sent IDLE command to Arduino');
+            return true;
+
+        } catch (error) {
+            console.error('❌ Failed to send IDLE to Arduino:', error.message);
+            return false;
+        }
+    }
 
     // Start idle mode with transition
     async startIdleMode() {
         if (this.idleMode) return; // Already in idle mode
         
         this.idleMode = true;
-        this.idleStartTime = Date.now();
-        this.lastIdleVolume = 0;
         
         console.log('🌙 Entering idle mode...');
         
@@ -1525,68 +1560,23 @@ class ViolinPlayer {
             this.idleTransitionTimeout = null;
         }
         
-        // Start idle animation
-        this.runIdleAnimation();
+        // Send IDLE command to Arduino
+        await this.sendIdleCommandToArduino();
     }
     
     // Stop idle mode
     stopIdleMode() {
+        if (!this.idleMode) return; // Already stopped
+        
         this.idleMode = false;
-
+        
         console.log('☀️ Exiting idle mode');
-
-        // Clear idle animation interval
-        if (this.idleAnimationInterval) {
-            clearInterval(this.idleAnimationInterval);
-            this.idleAnimationInterval = null;
-        }
         
         // Clear any pending transition
         if (this.idleTransitionTimeout) {
             clearTimeout(this.idleTransitionTimeout);
             this.idleTransitionTimeout = null;
         }
-    }
-    
-    // Run idle mode animation
-    async runIdleAnimation() {
-        // Clear any existing animation
-        if (this.idleAnimationInterval) {
-            clearInterval(this.idleAnimationInterval);
-        }
-        
-        const animate = async () => {
-            if (!this.idleMode) return;
-            
-            const elapsed = Date.now() - this.idleStartTime;
-            
-            let targetVolume;
-            
-            if (elapsed < 3000) {
-                // First 3 seconds: transition from 0 to 100
-                const progress = elapsed / 3000;
-                targetVolume = Math.round(progress * 100);
-            } else {
-                // After 3 seconds: wave from 100 to 20 to 100 every 4 seconds
-                const waveTime = (elapsed - 3000) % 4000;
-                const waveProgress = waveTime / 4000;
-                
-                const waveValue = 60 + 40 * Math.cos(waveProgress * Math.PI * 2);
-                targetVolume = Math.round(waveValue);
-            }
-            
-            // Only send if volume changed
-            if (targetVolume !== this.lastIdleVolume) {
-                await this.sendSpecificVolumeToArduino(targetVolume);
-                this.lastIdleVolume = targetVolume;
-            }
-        };
-        
-        // Run immediately
-        await animate();
-        
-        // Then run every 50ms for smooth animation
-        this.idleAnimationInterval = setInterval(animate, 50);
     }
     
     // Schedule transition to idle mode
