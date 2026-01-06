@@ -30,6 +30,7 @@ class ViolinPlayer {
         this.usingWebAudioVolume = false; // Flag for Web Audio volume control
         this.needsWebAudioVolume = false; // Flag to setup Web Audio when audio loads
         this.currentTrack = null;
+        this.currentAudioUrl = null; // Store current audio URL for re-loading after forcePause
         this.isTestPlaying = false;
         this.isImuPlaying = false; // Default to false - starts paused until Bluetooth connected
         this.onMetadataLoaded = null; // Track metadata listener to prevent duplicates
@@ -69,7 +70,7 @@ class ViolinPlayer {
         this.fadeStartVolume = 0;
         this.fadeTargetVolume = 0;
         this.fadeInDuration = 500; // fade-in duration
-        this.fadeOutDuration = 30; // fade-out duration (faster)
+        this.fadeOutDuration = 250; // fade-out duration (faster)
 
         // Volume smoothing (moving average filter for smoother transitions)
         this.volumeHistory = [];
@@ -2262,6 +2263,7 @@ class ViolinPlayer {
             // Set new source
             this.audioElement.src = audioUrl;
             this.currentTrack = name;
+            this.currentAudioUrl = audioUrl; // Store for re-loading after forcePause
             document.getElementById('trackName').textContent = name;
 
             // Remove old listener to prevent memory leak
@@ -2311,7 +2313,14 @@ class ViolinPlayer {
     async forcePause() {
         this.audioElement.pause();
         const lastTime = this.audioElement.currentTime;
+        const savedUrl = this.currentAudioUrl; // Save URL before load() clears it
         this.audioElement.load(); // Reset the audio element
+        
+        // Restore the source URL after load()
+        if (savedUrl) {
+            this.audioElement.src = savedUrl;
+        }
+        
         this.audioElement.currentTime = lastTime;
     }
 
