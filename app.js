@@ -12,6 +12,7 @@ class ViolinPlayer {
         this.disconnectListenerAdded = false; // Track if listener is already added
         this.arduinoVolumeFeedbackEnabled = true; // Toggle for sending volume to Arduino
         this.arduinoMaxVolumeScale = 1.0; // Scale factor for Arduino volume (0.0 - 1.0)
+        this.arduinoLedEnabled = true; // Toggle for Arduino LED on/off
         this.startIMUPlaybackOnConnect = false; // Whether to start IMU playback on connect
         
         // Idle mode (Arduino LED animation when not playing)
@@ -998,6 +999,12 @@ class ViolinPlayer {
         // Arduino Volume Feedback Toggle
         document.getElementById('arduinoVolumeFeedbackToggle').addEventListener('change', (e) => this.toggleArduinoVolumeFeedback(e.target.checked));
 
+        // Arduino LED Toggle
+        document.getElementById('arduinoLedToggle').addEventListener('change', (e) => {
+            this.arduinoLedEnabled = e.target.checked;
+            this.sendLedCommandToArduino(e.target.checked);
+        });
+
         // Arduino Max Volume Scale
         document.getElementById('arduinoMaxVolumeSlider').addEventListener('input', (e) => {
             this.arduinoMaxVolumeScale = e.target.value / 100;
@@ -1542,6 +1549,44 @@ class ViolinPlayer {
 
         } catch (error) {
             console.error('❌ Failed to send IDLE to Arduino:', error.message);
+            return false;
+        }
+    }
+    
+    // Send LED control command to Arduino
+    async sendLedCommandToArduino(enabled) {
+        if (!this.characteristic) {
+            console.warn('⚠️ Cannot send LED command: No characteristic connected');
+            return false;
+        }
+
+        try {
+            // Check if characteristic supports write
+            const canWrite = this.characteristic.properties.write ||
+                           this.characteristic.properties.writeWithoutResponse;
+
+            if (!canWrite) {
+                console.warn('⚠️ Characteristic does not support writing');
+                return false;
+            }
+
+            // Create data packet: "LED:ON\n" or "LED:OFF\n" format
+            const message = enabled ? 'LED:ON\n' : 'LED:OFF\n';
+            const encoder = new TextEncoder();
+            const data = encoder.encode(message);
+
+            // Send to Arduino
+            if (this.characteristic.properties.writeWithoutResponse) {
+                await this.characteristic.writeValueWithoutResponse(data);
+            } else {
+                await this.characteristic.writeValue(data);
+            }
+
+            console.log(`💡 Sent LED command to Arduino: ${enabled ? 'ON' : 'OFF'}`);
+            return true;
+
+        } catch (error) {
+            console.error('❌ Failed to send LED command to Arduino:', error.message);
             return false;
         }
     }
