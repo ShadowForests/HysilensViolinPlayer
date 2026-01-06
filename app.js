@@ -517,7 +517,7 @@ class ViolinPlayer {
     }
 
     // Safely set audio volume with fallbacks for older browsers
-    setAudioVolume(volume) {
+    setAudioVolume(volume, isForceSet = false) {
         // Clamp volume between 0 and 1
         const clampedVolume = Math.max(0, Math.min(1, volume));
 
@@ -536,7 +536,7 @@ class ViolinPlayer {
         const isTransitionToZero = clampedVolume === 0 && previousVolume > 0;
         const isTransitionToMax = clampedVolume === 1.0 && previousVolume < 1.0;
         const isSignificantChange = Math.abs(clampedVolume - previousVolume) > 0.02;
-        const shouldSendToArduino = isTransitionToZero || isTransitionToMax || (clampedVolume > 0 && clampedVolume < 1.0 && isSignificantChange);
+        const shouldSendToArduino = isForceSet || isTransitionToZero || isTransitionToMax || (clampedVolume > 0 && clampedVolume < 1.0 && isSignificantChange);
 
         try {
             // When using Web Audio volume, use gain node with smooth ramping
@@ -1611,6 +1611,7 @@ class ViolinPlayer {
                     if (this.smoothedVolume < 0.01 && !this.audioElement.paused) {
                         this.forcePause();
                         console.log('🔇 Audio paused after fade-out complete');
+                        this.setAudioVolume(0, true); // Ensure volume is set to 0
                     }
                 } else {
                     if (this.audioElement.paused) {
