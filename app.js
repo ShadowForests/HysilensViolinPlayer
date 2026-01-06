@@ -2284,7 +2284,7 @@ class ViolinPlayer {
             // Add error handler
             this.audioElement.addEventListener('error', (e) => {
                 console.error('Audio loading error:', e);
-                alert('Failed to load audio file. The file may be corrupted or in an unsupported format.');
+                // alert('Failed to load audio file. The file may be corrupted or in an unsupported format.');
             }, { once: true });
 
             // Auto-play if IMU playback is active
