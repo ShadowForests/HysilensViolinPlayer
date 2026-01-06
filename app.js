@@ -12,6 +12,14 @@ class ViolinPlayer {
         this.disconnectListenerAdded = false; // Track if listener is already added
         this.arduinoVolumeFeedbackEnabled = true; // Toggle for sending volume to Arduino
         this.arduinoMaxVolumeScale = 1.0; // Scale factor for Arduino volume (0.0 - 1.0)
+        this.startIMUPlaybackOnConnect = false; // Whether to start IMU playback on connect
+        
+        // Idle mode (Arduino LED animation when not playing)
+        this.idleMode = false; // Whether idle mode is active
+        this.idleTransitionTimeout = null; // Timeout before entering idle mode
+        this.idleAnimationInterval = null; // Interval for idle wave animation
+        this.idleStartTime = 0; // When idle mode started
+        this.lastIdleVolume = 0; // Last volume sent in idle mode
 
         // Audio
         this.audioContext = null;
@@ -166,7 +174,7 @@ class ViolinPlayer {
         this.audioElement.setAttribute('webkit-playsinline', '');
 
         // Handle song end when loop is disabled
-        this.audioElement.addEventListener('ended', () => {
+        this.audioElement.addEventListener('ended', async () => {
             // Only act if loop is disabled
             if (!this.audioElement.loop) {
                 // Turn off IMU playback if active
@@ -174,6 +182,12 @@ class ViolinPlayer {
                     console.log('🔚 Song ended with loop disabled - turning off IMU playback');
                     this.isImuPlaying = false;
                     this.updateImuPlaybackButton(false);
+                    
+                    // Handle idle mode transition
+                    if (this.currentVolume > 0) {
+                        await this.fadeArduinoVolumeToZero(1000);
+                    }
+                    this.scheduleIdleModeTransition();
                 }
 
                 // Turn off test playback if active
@@ -181,6 +195,12 @@ class ViolinPlayer {
                     console.log('🔚 Song ended with loop disabled - turning off test playback');
                     this.isTestPlaying = false;
                     this.updateTestPlaybackButton(false);
+                    
+                    // Handle idle mode transition
+                    if (this.currentVolume > 0) {
+                        await this.fadeArduinoVolumeToZero(1000);
+                    }
+                    this.scheduleIdleModeTransition();
                 }
             }
         });
@@ -1242,30 +1262,36 @@ class ViolinPlayer {
                 console.log('Test playback stopped (IMU playback auto-started)');
             }
 
-            // Automatically start IMU playback after successful connection
-            console.log('🎵 Auto-starting IMU playback after Bluetooth connection...');
-            this.isImuPlaying = true;
-            this.updateImuPlaybackButton(true);
+            if (this.startIMUPlaybackOnConnect) {
+                // Automatically start IMU playback after successful connection
+                console.log('🎵 Auto-starting IMU playback after Bluetooth connection...');
+                this.isImuPlaying = true;
+                this.updateImuPlaybackButton(true);
 
-            // Start audio if track is loaded
-            if (this.audioElement.src) {
-                // Resume AudioContext if needed
-                if (this.audioContext.state === 'suspended') {
-                    console.log('🔊 Resuming AudioContext...');
-                    await this.audioContext.resume();
+                // Start audio if track is loaded
+                if (this.audioElement.src) {
+                    // Resume AudioContext if needed
+                    if (this.audioContext.state === 'suspended') {
+                        console.log('🔊 Resuming AudioContext...');
+                        await this.audioContext.resume();
+                    }
+
+                    // Setup Web Audio API if needed
+                    if (this.needsWebAudioVolume && !this.usingWebAudioVolume) {
+                        console.log('🔊 Setting up Web Audio API...');
+                        await this.setupWebAudioVolume();
+                    }
+
+                    // Start playback
+                    this.audioElement.play().catch(e => console.log('Audio play error:', e));
+                    console.log('✅ IMU playback auto-started!');
+                } else {
+                    console.log('ℹ️ IMU playback enabled, waiting for audio track to be loaded');
                 }
-
-                // Setup Web Audio API if needed
-                if (this.needsWebAudioVolume && !this.usingWebAudioVolume) {
-                    console.log('🔊 Setting up Web Audio API...');
-                    await this.setupWebAudioVolume();
-                }
-
-                // Start playback
-                this.audioElement.play().catch(e => console.log('Audio play error:', e));
-                console.log('✅ IMU playback auto-started!');
             } else {
-                console.log('ℹ️ IMU playback enabled, waiting for audio track to be loaded');
+                // Start idle mode animation by default after connection
+                console.log('🌙 Starting idle mode animation after Bluetooth connection...');
+                this.startIdleMode();
             }
 
         } catch (error) {
@@ -1284,6 +1310,11 @@ class ViolinPlayer {
         // Check if Arduino volume feedback is enabled
         if (!this.arduinoVolumeFeedbackEnabled) {
             return false; // Silently skip if disabled
+        }
+        
+        // Don't send actual volume if in idle mode
+        if (this.idleMode) {
+            return false; // Idle animation handles volume sending
         }
 
         try {
@@ -1359,6 +1390,130 @@ class ViolinPlayer {
         }
     }
 
+    // Start idle mode with transition
+    async startIdleMode() {
+        if (this.idleMode) return; // Already in idle mode
+        
+        this.idleMode = true;
+        this.idleStartTime = Date.now();
+        this.lastIdleVolume = 0;
+        
+        console.log('🌙 Entering idle mode...');
+        
+        // Clear any existing transition timeout
+        if (this.idleTransitionTimeout) {
+            clearTimeout(this.idleTransitionTimeout);
+            this.idleTransitionTimeout = null;
+        }
+        
+        // Start idle animation
+        this.runIdleAnimation();
+    }
+    
+    // Stop idle mode
+    stopIdleMode() {
+        this.idleMode = false;
+
+        console.log('☀️ Exiting idle mode');
+
+        // Clear idle animation interval
+        if (this.idleAnimationInterval) {
+            clearInterval(this.idleAnimationInterval);
+            this.idleAnimationInterval = null;
+        }
+        
+        // Clear any pending transition
+        if (this.idleTransitionTimeout) {
+            clearTimeout(this.idleTransitionTimeout);
+            this.idleTransitionTimeout = null;
+        }
+    }
+    
+    // Run idle mode animation
+    async runIdleAnimation() {
+        // Clear any existing animation
+        if (this.idleAnimationInterval) {
+            clearInterval(this.idleAnimationInterval);
+        }
+        
+        const animate = async () => {
+            if (!this.idleMode) return;
+            
+            const elapsed = Date.now() - this.idleStartTime;
+            
+            let targetVolume;
+            
+            if (elapsed < 3000) {
+                // First 3 seconds: transition from 0 to 100
+                const progress = elapsed / 3000;
+                targetVolume = Math.round(progress * 100);
+            } else {
+                // After 3 seconds: wave from 100 to 75 to 100 every 4 seconds
+                const waveTime = (elapsed - 3000) % 4000;
+                const waveProgress = waveTime / 4000;
+                
+                // Sine wave from 100 to 20 to 100
+                const waveValue = 60 + 40 * Math.cos(waveProgress * Math.PI * 2);
+                targetVolume = Math.round(waveValue);
+            }
+            
+            // Only send if volume changed
+            if (targetVolume !== this.lastIdleVolume) {
+                await this.sendSpecificVolumeToArduino(targetVolume);
+                this.lastIdleVolume = targetVolume;
+            }
+        };
+        
+        // Run immediately
+        await animate();
+        
+        // Then run every 50ms for smooth animation
+        this.idleAnimationInterval = setInterval(animate, 50);
+    }
+    
+    // Schedule transition to idle mode
+    scheduleIdleModeTransition() {
+        // Clear any existing timeout
+        if (this.idleTransitionTimeout) {
+            clearTimeout(this.idleTransitionTimeout);
+            this.idleTransitionTimeout = null;
+        }
+        
+        // Otherwise, schedule transition after 5 seconds
+        console.log('⏱️ Scheduling idle mode transition in 5 seconds...');
+        this.idleTransitionTimeout = setTimeout(() => {
+            this.startIdleMode();
+        }, 5000);
+    }
+    
+    // Gradually fade Arduino volume to 0 over specified duration
+    async fadeArduinoVolumeToZero(durationMs = 1000) {
+        const startVolume = Math.round(this.currentVolume * this.arduinoMaxVolumeScale * 100);
+        const startTime = Date.now();
+        
+        console.log(`📉 Fading Arduino volume from ${startVolume}% to 0% over ${durationMs}ms...`);
+        
+        const fade = async () => {
+            const elapsed = Date.now() - startTime;
+            const progress = Math.min(elapsed / durationMs, 1.0);
+            
+            // Ease-out curve for smooth fade
+            const easedProgress = 1 - Math.pow(1 - progress, 2);
+            const currentVolume = Math.round(startVolume * (1 - easedProgress));
+            
+            await this.sendSpecificVolumeToArduino(currentVolume);
+            
+            if (progress < 1.0) {
+                // Continue fading
+                setTimeout(fade, 30);
+            } else {
+                console.log('✅ Arduino volume fade complete');
+            }
+        };
+        
+        await fade();
+    }
+    
     // Toggle Arduino volume feedback on/off
     // When turned off, set volume to 100 to ensure LED is always on
     async toggleArduinoVolumeFeedback(isChecked) {
@@ -1612,6 +1767,12 @@ class ViolinPlayer {
                         this.forcePause();
                         console.log('🔇 Audio paused after fade-out complete');
                         this.setAudioVolume(0, true); // Ensure volume is set to 0
+                        // Send volume 0 to Arduino after 0.5 seconds when pausing after fade-out
+                        setTimeout(async () => {
+                            if (this.audioElement.paused && this.currentVolume === 0) {
+                                await this.sendSpecificVolumeToArduino(0);
+                            }
+                        }, 500);
                     }
                 } else {
                     if (this.audioElement.paused) {
@@ -2025,6 +2186,9 @@ class ViolinPlayer {
         this.updateImuPlaybackButton(this.isImuPlaying);
 
         if (this.isImuPlaying) {
+            // Exit idle mode when starting playback
+            this.stopIdleMode();
+            
             // Stop test playback if it's currently active
             if (this.isTestPlaying) {
                 this.isTestPlaying = false;
@@ -2062,6 +2226,12 @@ class ViolinPlayer {
             } else {
                 this.stopMidiPlayback();
             }
+            
+            // Handle idle mode transition when stopping
+            if (this.currentVolume > 0) {
+                await this.fadeArduinoVolumeToZero(1000);
+            }
+            this.scheduleIdleModeTransition();
         }
     }
 
@@ -2070,6 +2240,9 @@ class ViolinPlayer {
         this.updateTestPlaybackButton(this.isTestPlaying);
 
         if (this.isTestPlaying) {
+            // Exit idle mode when starting test playback
+            this.stopIdleMode();
+            
             // Pause IMU playback if it's currently playing
             if (this.isImuPlaying) {
                 // Directly set the state and update UI
@@ -2093,6 +2266,7 @@ class ViolinPlayer {
             }
 
             // Start test playback
+            this.sendSpecificVolumeToArduino(100);
             if (this.playbackMode === 'MP3') {
                 this.setAudioVolume(this.maxVolume);
                 this.audioElement.play().catch(e => console.log('Play error:', e));
@@ -2106,6 +2280,12 @@ class ViolinPlayer {
             } else {
                 this.stopMidiPlayback();
             }
+            
+            // Handle idle mode transition when stopping
+            if (this.currentVolume > 0) {
+                await this.fadeArduinoVolumeToZero(1000);
+            }
+            this.scheduleIdleModeTransition();
         }
     }
 
@@ -2167,6 +2347,10 @@ class ViolinPlayer {
 
             // Wait for the specified delay
             console.log(`⏳ Waiting ${delaySeconds} seconds before starting IMU playback...`);
+
+            // Exit idle mode when starting with delay
+            this.stopIdleMode();
+            this.sendSpecificVolumeToArduino(0);
 
             // Countdown display
             for (let i = delaySeconds; i > 0; i--) {
